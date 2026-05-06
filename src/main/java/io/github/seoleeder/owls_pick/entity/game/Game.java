@@ -71,11 +71,13 @@ public class Game {
     @Builder.Default
     private Boolean isAdult = false;
 
+    @Enumerated(EnumType.STRING)
     @JdbcTypeCode(SqlTypes.ARRAY)
     @Builder.Default
     @Column(columnDefinition = "text[]")
     private List<GameModeType> mode = new ArrayList<>();
 
+    @Enumerated(EnumType.STRING)
     @JdbcTypeCode(SqlTypes.ARRAY)
     @Builder.Default
     @Column(columnDefinition = "text[]")
