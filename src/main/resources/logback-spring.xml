@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!-- 외부 XML 설정 파일(스프링 부트 기본 콘솔 출력 프리셋)을 현재 파일로 병합 -->
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+
+    <!-- application.yaml의 값을 가져와 사용하는 내부 변수 선언 -->
+    <springProperty scope="context" name="appName" source="spring.application.name" defaultValue="owls-pick-api"/>
+
+    <!-- 로그 이벤트의 출력 목적지와 동작 엔진 정의 (Loki HTTP 비동기 전송기) -->
+    <appender name="LOKI" class="com.github.loki4j.logback.Loki4jAppender">
+        <http>
+            <!-- 로그를 수신할 도커 내 Loki 엔드포인트 -->
+            <url>http://loki:3100/loki/api/v1/push</url>
+        </http>
+        <format>
+            <!-- Grafana에서 쿼리 검색 조건(인덱스 키)으로 사용할 메타데이터 태그 집합 -->
+            <label>
+                <pattern>application=${appName},level=%level</pattern>
+            </label>
+            <!--
+                실제 스토리지에 저장되는 로그 본문 포맷
+                형식: 발생시간 [스레드명] 에러레벨 클래스명 - 영문 에러 메시지
+            -->
+            <message>
+                <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+            </message>
+            <!-- 시간 순 정렬 -->
+            <sortByTime>true</sortByTime>
+        </format>
+    </appender>
+
+    <!-- 프로젝트 전역에 기본 적용되는 최상위 로거 및 통과시킬 최소 로그 레벨 -->
+    <root level="INFO">
+        <!--해당 로거를 통과한 로그를 터미널(CONSOLE)과 외부(LOKI)로 라우팅-->
+        <appender-ref ref="CONSOLE" />
+        <appender-ref ref="LOKI" />
+    </root>
+</configuration>

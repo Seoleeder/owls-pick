@@ -20,3 +20,43 @@ services:
   redis:
     ports:
       - "6379:6379" # 로컬에서 Redis GUI 툴 접속을 위해 개방
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: owls-pick-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      # 로컬에 생성한 설정 파일을 컨테이너 내부로 마운트
+      # [내 PC의 실제 경로] : [도커 컨테이너 내부의 약속된 경로]
+      - ./prometheus/prometheus.yaml:/etc/prometheus/prometheus.yml
+    networks:
+      - owls-pick-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: owls-pick-grafana
+    ports:
+      - "4000:3000"
+    environment:
+      # 그라파나 초기 접속 아이디와 비밀번호
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
+    networks:
+      - owls-pick-network
+
+  loki:
+    image: grafana/loki:2.9.8
+    container_name: owls-pick-loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki-data:/loki
+    networks:
+      - owls-pick-network
+
+volumes:
+  loki-data:

@@ -69,7 +69,11 @@ public class SecurityConfig {
                                 // swagger 관련
                                 "/swagger-ui.html",
                                 "/swagger-ui/**",
-                                "/v3/api-docs/**"
+                                "/v3/api-docs/**",
+
+                                // prometheus actuator
+                                "/actuator/prometheus",
+                                "/actuator/health"
                         ).permitAll()
 
                         // 그 외 모든 요청은 토큰 인증 필요
