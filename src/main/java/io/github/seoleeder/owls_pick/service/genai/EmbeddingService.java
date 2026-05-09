@@ -11,9 +11,9 @@ import io.github.seoleeder.owls_pick.global.response.ErrorCode;
 import io.github.seoleeder.owls_pick.entity.game.enums.status.EmbeddingStatus;
 import io.github.seoleeder.owls_pick.repository.GameRepository;
 import io.github.seoleeder.owls_pick.repository.VectorEmbeddingRepository;
-import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -27,9 +27,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -44,22 +41,22 @@ public class EmbeddingService {
     private final RestClient restClient;
     private final GenaiProperties props;
 
-    private final ExecutorService executorService;
+    private final AsyncTaskExecutor taskExecutor;
     private final TransactionTemplate transactionTemplate;
 
     public EmbeddingService(
             GameRepository gameRepository,
             VectorEmbeddingRepository vectorEmbeddingRepository,
             @Qualifier("genaiRestClient") RestClient restClient,
+            @Qualifier("applicationTaskExecutor") AsyncTaskExecutor taskExecutor,
             TransactionTemplate transactionTemplate,
             GenaiProperties props) {
         this.gameRepository = gameRepository;
         this.vectorEmbeddingRepository = vectorEmbeddingRepository;
         this.restClient = restClient;
+        this.taskExecutor = taskExecutor;
         this.transactionTemplate = transactionTemplate;
         this.props = props;
-
-        this.executorService = Executors.newFixedThreadPool(props.embedding().maxConcurrentTasks());
     }
 
     /**
@@ -128,7 +125,7 @@ public class EmbeddingService {
                         // 단일 배치 실패가 전체 청크/파이프라인 진행을 멈추지 않음
                         log.error("[GenAI] Unexpected error during embedding batch. Skipping batch.", e);
                     }
-                }, executorService))
+                }, taskExecutor))
                 .toList();
 
         // 현재 배치의 모든 작업이 끝날 때까지 대기
@@ -278,20 +275,20 @@ public class EmbeddingService {
         return partitions;
     }
 
-    /**
-     * 애플리케이션 종료 시 잔여 스레드 작업 완료 대기 및 안전 종료
-     */
-    @PreDestroy
-    public void shutdownExecutor() {
-        log.info("[GenAI] Shutting down Vector Embedding ExecutorService...");
-        executorService.shutdown();
-        try {
-            if (!executorService.awaitTermination(5, TimeUnit.SECONDS)) {
-                executorService.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            executorService.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
-    }
+//    /**
+//     * 애플리케이션 종료 시 잔여 스레드 작업 완료 대기 및 안전 종료
+//     */
+//    @PreDestroy
+//    public void shutdownExecutor() {
+//        log.info("[GenAI] Shutting down Vector Embedding ExecutorService...");
+//        executorService.shutdown();
+//        try {
+//            if (!executorService.awaitTermination(5, TimeUnit.SECONDS)) {
+//                executorService.shutdownNow();
+//            }
+//        } catch (InterruptedException e) {
+//            executorService.shutdownNow();
+//            Thread.currentThread().interrupt();
+//        }
+//    }
 }
