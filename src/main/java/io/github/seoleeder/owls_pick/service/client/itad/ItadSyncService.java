@@ -10,8 +10,9 @@ import io.github.seoleeder.owls_pick.entity.game.StoreDetail;
 import io.github.seoleeder.owls_pick.entity.game.StoreDetail.StoreName;
 import io.github.seoleeder.owls_pick.repository.GameRepository;
 import io.github.seoleeder.owls_pick.repository.StoreDetailRepository;
-import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -20,8 +21,6 @@ import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -33,23 +32,27 @@ public class ItadSyncService {
     private final GameRepository gameRepository;
     private final StoreDetailRepository storeDetailRepository;
 
+    private final AsyncTaskExecutor taskExecutor;
     private final TransactionTemplate transactionTemplate;
 
     private final ItadProperties props;
 
-    // DB 커넥션 풀을 고려한 병렬 처리용 고정 스레드 엔진
-    private final ExecutorService executorService;
-
     private static final String NOT_FOUND = "NONE";
     private static final String MAIN_GAME_TYPE = "Main Game";
 
-    public ItadSyncService(ItadDataCollector collector, GameRepository gameRepository, StoreDetailRepository storeDetailRepository, TransactionTemplate transactionTemplate, ItadProperties props) {
+    public ItadSyncService(
+            ItadDataCollector collector,
+            GameRepository gameRepository,
+            StoreDetailRepository storeDetailRepository,
+            @Qualifier("applicationTaskExecutor") AsyncTaskExecutor taskExecutor,
+            TransactionTemplate transactionTemplate,
+            ItadProperties props) {
         this.collector = collector;
         this.gameRepository = gameRepository;
         this.storeDetailRepository = storeDetailRepository;
+        this.taskExecutor = taskExecutor;
         this.transactionTemplate = transactionTemplate;
         this.props = props;
-        this.executorService = Executors.newFixedThreadPool(props.syncThreadPoolSize());
     }
 
 
@@ -203,7 +206,7 @@ public class ItadSyncService {
                     // 실시간 로깅
                     log.info("[ITAD Price Sync] Batch {}/{} completed. (Details updated: {})",
                             currentBatch, totalBatches, updatedCount);
-                }, executorService))
+                }, taskExecutor))
                 .toList();
 
         // 전체 배치 작업이 완료될 때까지 대기
@@ -418,11 +421,11 @@ public class ItadSyncService {
                 .orElse(candidates.get(0));
     }
 
-    // 애플리케이션 종료 시 스레드 풀 자원 정리
-    @PreDestroy
-    public void cleanup() {
-        if (executorService != null && !executorService.isShutdown()) {
-            executorService.shutdown();
-        }
-    }
+//    // 애플리케이션 종료 시 스레드 풀 자원 정리
+//    @PreDestroy
+//    public void cleanup() {
+//        if (executorService != null && !executorService.isShutdown()) {
+//            executorService.shutdown();
+//        }
+//    }
 }

@@ -8,9 +8,9 @@ import io.github.seoleeder.owls_pick.global.response.CustomException;
 import io.github.seoleeder.owls_pick.global.response.ErrorCode;
 import io.github.seoleeder.owls_pick.repository.ReviewRepository;
 import io.github.seoleeder.owls_pick.repository.ReviewStatRepository;
-import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -20,9 +20,6 @@ import org.springframework.web.util.UriComponentsBuilder;
 import java.net.URI;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 
 
 /**
@@ -35,9 +32,9 @@ public class ReviewSummaryService {
     private final ReviewStatRepository reviewStatRepository;
     private final ReviewRepository reviewRepository;
     private final RestClient restClient;
+    private final AsyncTaskExecutor taskExecutor; // Trace ID 전파 및 가상 스레드 처리를 지원하는 스프링 메인 실행기
     private final GenaiProperties props;
 
-    private final ExecutorService executorService;
 
     // 총 리뷰 수가 임계치 넘지만 실제 리뷰는 없는 게임 스킵 마킹 상수
     public static final String INSUFFICIENT_DATA_FLAG = "INSUFFICIENT_REVIEW_DATA";
@@ -49,13 +46,15 @@ public class ReviewSummaryService {
             ReviewStatRepository reviewStatRepository,
             ReviewRepository reviewRepository,
             @Qualifier("genaiRestClient") RestClient restClient,
+            // 분산 추적(Trace ID) 설정이 내장된 실행기 지정 주입
+            @Qualifier("applicationTaskExecutor") AsyncTaskExecutor taskExecutor,
             GenaiProperties props) {
         this.reviewStatRepository = reviewStatRepository;
         this.reviewRepository = reviewRepository;
         this.restClient = restClient;
+        this.taskExecutor = taskExecutor;
         this.props = props;
 
-        this.executorService = Executors.newFixedThreadPool(props.review().maxConcurrentTasks());
     }
 
     /**
@@ -109,6 +108,7 @@ public class ReviewSummaryService {
         log.info("[GenAI] Processing a single batch. Target count: {}", targets.size());
 
         // 리뷰 요약 메서드 비동기 병렬 실행
+        // taskExecutor: 부모 스레드의 MDC 상태(Trace ID)를 신규 스레드로 자동 복사
         List<CompletableFuture<Void>> futures = targets.stream()
                 .map(stat -> CompletableFuture.runAsync(() -> {
                     try {
@@ -117,7 +117,7 @@ public class ReviewSummaryService {
                         // 단일 게임 처리 실패 시 고립 (전체 배치 영향 X)
                         log.error("[GenAI] Unexpected error for Game ID: {}. Skipping.", stat.getGame().getId(), e);
                     }
-                }, executorService))
+                }, taskExecutor))
                 .toList();
 
         // 현재 배치의 모든 비동기 작업이 완료될 때까지 대기
@@ -234,22 +234,5 @@ public class ReviewSummaryService {
         stat.updateReviewSummary(SUMMARY_FAILED_FLAG, null, null);
         reviewStatRepository.save(stat);
         log.info("[GenAI] Game ID: {} marked as SUMMARY_FAILED to prevent infinite requerying.", stat.getGame().getId());
-    }
-
-    /**
-     * 스프링 컨텍스트 종료 시 스레드 풀 자원 안전 반환 (Graceful Shutdown)
-     */
-    @PreDestroy
-    public void shutdownExecutor() {
-        log.info("[GenAI] Shutting down Review Summary ExecutorService...");
-        executorService.shutdown();
-        try {
-            if (!executorService.awaitTermination(5, TimeUnit.SECONDS)) {
-                executorService.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            executorService.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
     }
 }

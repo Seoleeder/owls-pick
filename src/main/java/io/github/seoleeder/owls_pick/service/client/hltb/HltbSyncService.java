@@ -9,9 +9,9 @@ import io.github.seoleeder.owls_pick.global.response.CustomException;
 import io.github.seoleeder.owls_pick.global.response.ErrorCode;
 import io.github.seoleeder.owls_pick.repository.GameRepository;
 import io.github.seoleeder.owls_pick.repository.PlaytimeRepository;
-import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.RestClient;
@@ -19,9 +19,6 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 
 @Service
 @Slf4j
@@ -31,23 +28,21 @@ public class HltbSyncService {
     private final RestClient hltbRestClient;
     private final HltbProperties hltbProperties;
     private final TransactionTemplate transactionTemplate;
-
-    private final ExecutorService executorService;
+    private final AsyncTaskExecutor taskExecutor;
 
     public HltbSyncService(
             PlaytimeRepository playtimeRepository,
             GameRepository gameRepository,
             @Qualifier("hltbRestClient") RestClient hltbRestClient,
             HltbProperties hltbProperties,
-            TransactionTemplate transactionTemplate) {
+            TransactionTemplate transactionTemplate,
+            @Qualifier("applicationTaskExecutor") AsyncTaskExecutor taskExecutor) {
         this.playtimeRepository = playtimeRepository;
         this.gameRepository = gameRepository;
         this.hltbRestClient = hltbRestClient;
         this.hltbProperties = hltbProperties;
         this.transactionTemplate = transactionTemplate;
-
-        // 가상 스레드 풀 초기화
-        this.executorService = Executors.newVirtualThreadPerTaskExecutor();
+        this.taskExecutor = taskExecutor;
     }
 
     /**
@@ -72,7 +67,7 @@ public class HltbSyncService {
 
             // 가상 스레드 기반 병렬 처리
             List<CompletableFuture<Void>> futures = targets.stream()
-                    .map(game -> CompletableFuture.runAsync(() -> syncSingleGame(game), executorService))
+                    .map(game -> CompletableFuture.runAsync(() -> syncSingleGame(game), taskExecutor))
                     .toList();
 
             // 청크 내 전체 작업 완료 대기
@@ -102,7 +97,7 @@ public class HltbSyncService {
         }
 
         List<CompletableFuture<Void>> futures = targets.stream()
-                .map(game -> CompletableFuture.runAsync(() -> syncSingleGame(game), executorService))
+                .map(game -> CompletableFuture.runAsync(() -> syncSingleGame(game), taskExecutor))
                 .toList();
 
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
@@ -198,25 +193,25 @@ public class HltbSyncService {
         playtime.updateSyncResult(null, null, null, SyncStatus.FAILED);
         playtimeRepository.save(playtime);
     }
-
-    /**
-     * 스프링 컨텍스트 종료 시 가상 스레드 풀 자원 반환
-     */
-    @PreDestroy
-    public void shutdownExecutor() {
-        log.info("[HLTB Sync] Shutting down HLTB Sync ExecutorService...");
-
-        // 새로운 작업 수락 중단
-        executorService.shutdown();
-
-        try {
-            // 5초 대기 후 남은 작업 강제 종료
-            if (!executorService.awaitTermination(5, TimeUnit.SECONDS)) {
-                executorService.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            executorService.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
-    }
 }
+//    /**
+//     * 스프링 컨텍스트 종료 시 가상 스레드 풀 자원 반환
+//     */
+//    @PreDestroy
+//    public void shutdownExecutor() {
+//        log.info("[HLTB Sync] Shutting down HLTB Sync ExecutorService...");
+//
+//        // 새로운 작업 수락 중단
+//        executorService.shutdown();
+//
+//        try {
+//            // 5초 대기 후 남은 작업 강제 종료
+//            if (!executorService.awaitTermination(5, TimeUnit.SECONDS)) {
+//                executorService.shutdownNow();
+//            }
+//        } catch (InterruptedException e) {
+//            executorService.shutdownNow();
+//            Thread.currentThread().interrupt();
+//        }
+//    }
+

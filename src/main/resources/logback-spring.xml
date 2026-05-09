@@ -23,7 +23,7 @@
                 형식: 발생시간 [스레드명] 에러레벨 클래스명 - 영문 에러 메시지
             -->
             <message>
-                <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+                <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{traceId:-}] %logger{36} - %msg%n</pattern>
             </message>
             <!-- 시간 순 정렬 -->
             <sortByTime>true</sortByTime>

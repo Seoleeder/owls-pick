@@ -19,6 +19,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.core.task.SyncTaskExecutor;
+import org.springframework.core.task.support.TaskExecutorAdapter;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -58,7 +60,7 @@ class SteamReviewSyncServiceTest {
                 null,
                 null,
                 new SteamProperties.Sync(20), // threadPoolSize
-                new SteamProperties.Review(5, 200, 200), // minVotesUp, init, maintenance
+                new SteamProperties.Review(5, 200, 200, 3, 50), // minVotesUp, init, maintenance
                 null
         );
 
@@ -76,6 +78,7 @@ class SteamReviewSyncServiceTest {
                 reviewStatRepository,
                 reviewRepository,
                 gameRepository,
+                new TaskExecutorAdapter(new SyncTaskExecutor()),
                 transactionTemplate,
                 props,
                 curationProps

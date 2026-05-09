@@ -15,20 +15,18 @@ import io.github.seoleeder.owls_pick.repository.GameRepository;
 import io.github.seoleeder.owls_pick.repository.ReviewRepository;
 import io.github.seoleeder.owls_pick.repository.ReviewStatRepository;
 import io.github.seoleeder.owls_pick.repository.StoreDetailRepository;
-import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.web.client.RestClientException;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
@@ -40,7 +38,7 @@ public class SteamReviewSyncService {
     private final ReviewRepository reviewRepository;
     private final GameRepository gameRepository;
 
-    private final ExecutorService executorService; // 병렬 처리용 가상 스레드 엔진
+    private final AsyncTaskExecutor taskExecutor;   // Trace ID 전파용 실행기
     private final TransactionTemplate transactionTemplate; // 트랜잭션 수동 제어용
 
     private final SteamProperties steamProps;
@@ -52,6 +50,8 @@ public class SteamReviewSyncService {
             ReviewStatRepository reviewStatRepository,
             ReviewRepository reviewRepository,
             GameRepository gameRepository,
+            // applicationTaskExecutor : Trace ID 전파와 가상 스레드 처리를 담당하는 스프링 기본 실행기
+            @Qualifier("applicationTaskExecutor") AsyncTaskExecutor taskExecutor,
             TransactionTemplate transactionTemplate,
             SteamProperties steamProps,
             CurationProperties curationProps)
@@ -61,11 +61,10 @@ public class SteamReviewSyncService {
         this.reviewStatRepository = reviewStatRepository;
         this.reviewRepository = reviewRepository;
         this.gameRepository = gameRepository;
+        this.taskExecutor = taskExecutor;
         this.transactionTemplate = transactionTemplate;
         this.steamProps = steamProps;
         this.curationProps = curationProps;
-
-        this.executorService = Executors.newVirtualThreadPerTaskExecutor();
     }
 
     /**
@@ -268,7 +267,7 @@ public class SteamReviewSyncService {
 
         // futures : 비동기 작업의 결과물(작업 완료 상태)들을 모아둘 리스트
         // runAsync : 각각의 스팀 ID에 대해서 비동기 작업 수행
-        // executoryService : 비동기 작업을 수행할 스레드 풀
+        // taskExecutor: 부모 스레드의 MDC(Trace ID) 상태를 캡처하여 신규 스레드로 전파
         List<CompletableFuture<Void>> futures = targetGames.stream()
                 .map(detail -> CompletableFuture.runAsync(() -> {
                     // 리뷰 수집 및 저장 후, 새로 저장된 리뷰 개수 반환
@@ -281,7 +280,7 @@ public class SteamReviewSyncService {
                     // 실시간 진행 상황 로깅
                     log.info("[Steam Review] Game {}/{} processed. (New reviews saved: {})",
                             currentCompleted, totalTarget, savedCount);
-                }, executorService))
+                }, taskExecutor))
                 .toList();
 
         // 여러 메모리에 흩어져 있는 각각의 비동기 작업의 상태를 하나로 묶어서 통합 관리
@@ -292,10 +291,10 @@ public class SteamReviewSyncService {
 
         log.info("Batch Process Completed. Total new reviews saved across all threads: {}", totalSavedReviews.get());
     }
-
-    @PreDestroy
-    public void cleanup() {
-        // 애플리케이션 종료 시 스레드 풀도 우아하게 종료
-        executorService.shutdown();
-    }
+//
+//    @PreDestroy
+//    public void cleanup() {
+//        // 애플리케이션 종료 시 스레드 풀도 우아하게 종료
+//        executorService.shutdown();
+//    }
 }

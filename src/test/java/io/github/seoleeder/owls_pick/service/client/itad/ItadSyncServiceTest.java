@@ -19,6 +19,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.core.task.SyncTaskExecutor;
+import org.springframework.core.task.support.TaskExecutorAdapter;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -48,12 +50,13 @@ class ItadSyncServiceTest {
     @BeforeEach
     void setUp() {
         // ITAD 설정 객체 생성 (batchSize 포함)
-        ItadProperties props = new ItadProperties("test-key", "api.test.com", 100);
+        ItadProperties props = new ItadProperties("test-key", "api.test.com", 100,20);
 
         itadSyncService = new ItadSyncService(
                 collector,
                 gameRepository,
                 storeDetailRepository,
+                new TaskExecutorAdapter(new SyncTaskExecutor()),
                 transactionTemplate,
                 props
         );
