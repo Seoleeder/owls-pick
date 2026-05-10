@@ -90,7 +90,6 @@ public class SteamDashboardSyncService {
         }
 
         // 타입별 최신 데이터로 Redis 캐시 갱신
-        log.info("Refreshing all dashboard caches after backfill...");
         for (CurationType type : CurationType.values()) {
             dashboardService.refreshCache(type);
         }
@@ -160,7 +159,7 @@ public class SteamDashboardSyncService {
 
             //Redis 캐시 갱신
             dashboardService.refreshCache(CurationType.CONCURRENT_PLAYER);
-            log.info("Concurrent Players Synced.");
+            log.info("Concurrent Players Synced. (Updated: {} games)", concurrent.ranks().size());
         } catch (RestClientException e) {
             log.warn("Concurrent Players API Failed: {}", e.getMessage());
         } catch (Exception e) {
@@ -178,7 +177,7 @@ public class SteamDashboardSyncService {
 
             dashboardService.refreshCache(CurationType.MOST_PLAYED);
 
-            log.info("Most Played Synced.");
+            log.info("Most Played Synced. (Updated: {} games)", mostPlayed.ranks().size());
         } catch (RestClientException e) {
             log.warn("Most Played API Failed: {}", e.getMessage());
         } catch (Exception e) {
@@ -279,12 +278,14 @@ public class SteamDashboardSyncService {
 
                 // 4. 엔티티 생성
                 List<Dashboard> dashboards = new ArrayList<>();
+                int missingGames = 0;
 
                 for (SteamDashboardResponse.Rank rank : response.ranks()) {
                     Game game = gameMap.get(rank.appId());
 
                     if (game == null) {
                         // 우리 DB에 없는 게임은 랭킹에서 제외 (혹은 추후 수집 대상으로 로깅)
+                        missingGames++;
                         continue;
                     }
 
@@ -304,7 +305,9 @@ public class SteamDashboardSyncService {
                     dashboardRepository.saveAll(dashboards);
                 }
 
-                //Redis  캐시 갱신
+                log.debug("Saved {} dashboards for type [{}]. (Missing games: {})", dashboards.size(), type, missingGames);
+
+                //Redis 캐시 갱신
                 dashboardService.refreshCache(type);
             });
         } catch (DataAccessException e) {

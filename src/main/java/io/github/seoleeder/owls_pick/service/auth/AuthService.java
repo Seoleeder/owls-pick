@@ -80,8 +80,10 @@ public class AuthService {
                     jwtProperties.refreshTokenValidity(),
                     TimeUnit.MILLISECONDS
             );
+
+            log.info("[Auth] User logged in successfully - Provider: {}, UserId: {}", providerName, user.getId());
         } catch (Exception e) {
-            log.error("소셜 로그인 처리 중 예기치 않은 오류 발생", e);
+            log.error("[Auth] Unexpected error during social login Redis processing - UserId: {}", user.getId(), e);
             throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
         }
 
@@ -117,7 +119,10 @@ public class AuthService {
                 .providerId(userInfo.providerId())
                 .build();
 
-        return socialAccountRepository.save(socialAccount);
+        SocialAccount savedAccount = socialAccountRepository.save(socialAccount);
+        log.info("[Auth] New user registered - Provider: {}, UserId: {}", provider, user.getId());
+
+        return savedAccount;
     }
 
     /**
@@ -130,10 +135,10 @@ public class AuthService {
         try {
             jwtTokenProvider.validateToken(refreshToken);
         } catch (ExpiredJwtException e) {
-            log.warn("리프레시 토큰이 만료되었습니다.");
+            log.warn("[Auth] Refresh token has expired.");
             throw new CustomException(ErrorCode.EXPIRED_TOKEN);
         } catch (Exception e) {
-            log.warn("유효하지 않은 리프레시 토큰입니다.");
+            log.warn("[Auth] Invalid refresh token access detected.");
             throw new CustomException(ErrorCode.INVALID_TOKEN);
         }
 
@@ -148,12 +153,12 @@ public class AuthService {
 
         if (storedRefreshToken == null) {
             //Redis에 값이 존재하지 X
-            log.warn("Redis에 RT가 존재하지 않습니다. (로그아웃 또는 만료) UserId: {}", userId);
+            log.warn("[Auth] Refresh token not found in Redis (Logged out or Expired) - UserId: {}", userId);
             throw new CustomException(ErrorCode.REVOKED_REFRESH_TOKEN);
         }
         if (!storedRefreshToken.equals(refreshToken)) {
             //Redis의 값과 일치하지 않음
-            log.warn("Redis의 RT와 일치하지 않습니다! (탈취 의심) UserId: {}", userId);
+            log.warn("[Auth] Requested refresh token does not match Redis (Potential Hijacking) - UserId: {}", userId);
             // redisTemplate.delete(redisKey);
             throw new CustomException(ErrorCode.INVALID_TOKEN);
         }
@@ -167,6 +172,8 @@ public class AuthService {
                 userId, null, Collections.singleton(new SimpleGrantedAuthority("ROLE_USER"))
         );
         String newAccessToken = jwtTokenProvider.createAccessToken(authentication);
+
+        log.info("[Auth] Access Token successfully reissued - UserId: {}", userId);
 
         return LoginResponse.builder()
                 .accessToken(newAccessToken)
@@ -188,11 +195,11 @@ public class AuthService {
             // Redis에 키가 존재하면 삭제
             if (Boolean.TRUE.equals(redisTemplate.hasKey(redisKey))) {
                 redisTemplate.delete(redisKey);
-                log.info("유저 로그아웃 완료. Refresh Token 삭제 - userId: {}", userId);
+                log.info("[Auth] User logged out successfully. Refresh token deleted - UserId: {}", userId);
             }
         } catch (Exception e) {
             // 레디스 서버가 죽었거나 통신이 끊긴 경우
-            log.error("[로그아웃] Redis 서버 통신 실패 - userId: {}", userId, e);
+            log.error("[Auth] Redis communication failed during logout - UserId: {}", userId, e);
             throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
         }
     }
@@ -210,7 +217,7 @@ public class AuthService {
 
         // 유저 영구 삭제
         userRepository.deleteById(Long.valueOf(userId));
-        log.info("유저 회원 탈퇴 완료 - userId: {}", userId);
+        log.info("[Auth] User account successfully withdrawn - UserId: {}", userId);
     }
 
     /**
@@ -224,9 +231,11 @@ public class AuthService {
                     User newUser = User.builder()
                             .email(email)
                             // 이메일 앞자리를 따서 임시 닉네임 생성 (예: test@kakao.com -> 테스트유저_test)
-                            .name("테스트유저_" + email.split("@")[0])
+                            .name("test_user" + email.split("@")[0])
                             .build();
-                    return userRepository.save(newUser);
+                    User savedUser = userRepository.save(newUser);
+                    log.info("[Auth-Bypass] Test user auto-registered - UserId: {}, Email: {}", savedUser.getId(), email);
+                    return savedUser;
                 });
 
         // JWT 토큰 발급
@@ -242,12 +251,12 @@ public class AuthService {
             redisTemplate.opsForValue().set(
                     redisKey, refreshToken, jwtProperties.refreshTokenValidity(), TimeUnit.MILLISECONDS
             );
+            log.info("[Auth-Bypass] Test user login executed - UserId: {}", user.getId());
         } catch (Exception e) {
-            log.error("[백도어 로그인] Redis 서버 통신 실패", e);
+            log.error("[Auth-Bypass] Redis communication failed during backdoor login", e);
             throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
         }
 
-        // 4. 응답 반환
         return LoginResponse.builder()
                 .accessToken(accessToken)
                 .refreshToken(refreshToken)
@@ -265,7 +274,7 @@ public class AuthService {
     public void bypassLogout(String email) {
         userRepository.findByEmail(email).ifPresent(user -> {
             logout(user.getId().toString());
-            log.info("[백도어 로그아웃] email: {} 완료", email);
+            log.info("[Auth-Bypass] Logout completed - Email: {}", email);
         });
     }
 
@@ -275,21 +284,24 @@ public class AuthService {
      */
     @Transactional
     public void unlinkSocialAccount(String providerName, String providerId) {
-        log.info("[Social Unlink] {} 계정 연결 끊기 웹훅 수신. Provider ID: {}", providerName, providerId);
+        log.info("[Webhook] Starting {} account unlink webhook processing. Provider ID: {}", providerName, providerId);
 
         try {
             SocialAccount.Provider provider = SocialAccount.Provider.valueOf(providerName.toUpperCase());
 
             socialAccountRepository.findByProviderAndProviderId(provider, providerId)
-                    .ifPresent(socialAccount -> {
-                        User user = socialAccount.getUser();
+                    .ifPresentOrElse(
+                            socialAccount -> {
+                            User user = socialAccount.getUser();
                         // 회원 탈퇴(withdraw) 로직 활용 탈퇴 처리
-                        withdraw(user.getId().toString());
-                        log.info("[Social Unlink] {} 유저(Provider ID: {}) 데이터 영구 삭제 완료", providerName, providerId);
-                    });
+                            withdraw(user.getId().toString());
+                            log.info("[Webhook] Successfully deleted {} user data (Provider ID: {})", providerName, providerId);
+                        },
+                        () -> log.warn("[Webhook] Account to unlink not found. Provider: {}, Provider ID: {}", providerName, providerId)
+                );
         } catch (Exception e) {
             log.error("[Social Unlink] 웹훅 처리 중 오류 발생: {}", e.getMessage());
-            // 웹훅 응답은 무조건 200 OK로 줘야 함
+            // 웹훅 응답은 무조건 200
         }
     }
 }

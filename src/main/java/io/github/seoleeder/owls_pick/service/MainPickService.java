@@ -62,7 +62,7 @@ public class MainPickService {
      */
     @Scheduled(cron = "0 0 4 * * *")
     public void refreshValidCombinations() {
-        log.info("Updating valid genre-theme combinations in memory cache...");
+        log.info("[MainPick] Updating valid genre-theme combinations in memory cache...");
         List<GenreThemePair> newCombinations = new ArrayList<>();
 
         // 유효 조합의 기준이 되는 해당 조합의 최소 게임 수
@@ -81,7 +81,7 @@ public class MainPickService {
 
         // 갱신이 완료되면 한 번에 덮어쓰기 (동시성 이슈 최소화)
         this.validCombinations = newCombinations;
-        log.info("Memory cache updated successfully. Total valid combinations loaded: {}", validCombinations.size());
+        log.info("[MainPick] Memory cache updated successfully. Total valid combinations loaded: {}", validCombinations.size());
     }
 
     /**
@@ -89,6 +89,7 @@ public class MainPickService {
      * */
     @Transactional(readOnly = true)
     public UpcomingSectionResponse getUpcomingGames(Pageable pageable) {
+        log.debug("[MainPick] Fetching upcoming games.");
 
         CurationProperties.Upcoming props = curationProps.upcoming();
 
@@ -107,7 +108,7 @@ public class MainPickService {
      * [Section 1] 선호 태그 기반 맞춤 추천 (선호 태그를 가장 많이 포함하는 사용자 맞춤형 최적 게임 리스트 조회)
      */
     public PersonalizedSectionResponse getMostPersonalizedPicks(Long userId, Pageable pageable) {
-        log.info("Fetching most personalized picks for userId: {}", userId);
+        log.debug("[MainPick] Fetching most personalized picks for userId: {}", userId);
 
         // 유저 ID로 사용자 조회
         User user = getUser(userId);
@@ -129,7 +130,7 @@ public class MainPickService {
         // 장르 목록 중 장르 태그 하나 선택
         GenreType selectedGenre = genres[ThreadLocalRandom.current().nextInt(genres.length)];
 
-        log.info("Fetching random genre picks. Selected genre: {}", selectedGenre.name());
+        log.debug("[MainPick] Fetching random genre picks. Selected genre: {}", selectedGenre.name());
 
         Page<GameWithReviewStatDto> games = gameRepository.findGamesByGenre(selectedGenre, GameSortType.POPULAR, pageable);
         return new PersonalizedSectionResponse(selectedGenre.getKorName(), responseConverter.convertPage(games));
@@ -151,7 +152,7 @@ public class MainPickService {
         // 테마 목록 중 테마 태그 하나 선택
         ThemeType selectedTheme = safeThemes.get(ThreadLocalRandom.current().nextInt(safeThemes.size()));
 
-        log.info("Fetching random theme picks for userId: {}. Selected theme: {}", userId, selectedTheme.name());
+        log.debug("[MainPick] Fetching random theme picks for userId: {}. Selected theme: {}", userId, selectedTheme.name());
 
         Page<GameWithReviewStatDto> games = gameRepository.findGamesByTheme(selectedTheme, GameSortType.POPULAR, pageable);
         return new PersonalizedSectionResponse(selectedTheme.getKorName(), responseConverter.convertPage(games));
@@ -163,7 +164,7 @@ public class MainPickService {
     public PersonalizedSectionResponse getIntersectionPicks(Pageable pageable) {
         // 장르 X 테마 조합 데이터가 존재하지 않으면 INDIE 태그로 조회 후 반환
         if (validCombinations.isEmpty()) {
-            log.warn("No valid combinations found in memory cache. Falling back to INDIE genre.");
+            log.warn("[MainPick] No valid combinations found in memory cache. Falling back to INDIE genre.");
 
             Page<GameWithReviewStatDto> fallbackGames = gameRepository.findGamesByGenre(GenreType.INDIE, GameSortType.POPULAR, pageable);
 
@@ -172,7 +173,7 @@ public class MainPickService {
 
         GenreThemePair selectedPair = validCombinations.get(ThreadLocalRandom.current().nextInt(validCombinations.size()));
 
-        log.info("Fetching random intersection picks. Selected combination: [Genre: {}, Theme: {}]",
+        log.debug("[MainPick] Fetching random intersection picks. Selected combination: [Genre: {}, Theme: {}]",
                 selectedPair.genre().name(), selectedPair.theme().name());
 
         Page<GameWithReviewStatDto> games = gameRepository.findGamesByGenreAndThemeIntersection(
@@ -187,7 +188,7 @@ public class MainPickService {
      * [Section 5] 스코어는 높은데 리뷰 수는 상대적으로 적은 '숨겨진 명작' 게임 조회
      */
     public PersonalizedSectionResponse getHiddenMasterpieces(Pageable pageable) {
-        log.info("Fetching hidden masterpieces.");
+        log.debug("[MainPick] Fetching hidden masterpieces.");
         CurationProperties.HiddenMasterpiece props = curationProps.hiddenMasterpiece();
         Page<GameWithReviewStatDto> games = gameRepository.findHiddenMasterpieces(
                 props.minReviewScore(),
@@ -206,7 +207,7 @@ public class MainPickService {
         User user = getUser(userId);
         String safeTag = getSafeRandomPreferredTag(user);
 
-        log.info("Fetching trending picks for userId: {}. Selected tag: {}", userId, safeTag);
+        log.debug("[MainPick] Fetching trending picks for userId: {}. Selected tag: {}", userId, safeTag);
 
         Page<GameWithReviewStatDto> games = gameRepository.findTrendingGamesByTag(
                 safeTag, curationProps.trending().minReviewScore(), pageable
@@ -221,7 +222,7 @@ public class MainPickService {
         User user = getUser(userId);
         String safeTag = getSafeRandomPreferredTag(user);
 
-        log.info("Fetching quick plays for userId: {}. Selected tag: {}", userId, safeTag);
+        log.debug("[MainPick] Fetching quick plays for userId: {}. Selected tag: {}", userId, safeTag);
 
         Page<GameWithReviewStatDto> games = gameRepository.findShortPlaytimeGamesByTag(
                 safeTag, curationProps.shortPlaytime().maxPlaytime(), curationProps.shortPlaytime().minScore(), pageable

@@ -77,7 +77,7 @@ public class SteamReviewSyncService {
         List<StoreDetail> targetGames = storeDetailRepository.findGamesNeedingReviewUpdate(StoreDetail.StoreName.STEAM, steamProps.review().maintenanceBatchSize());
 
         if (targetGames.isEmpty()) {
-            log.info("All games are up to date.");
+            log.debug("Review Sync: All games are up to date. Skipping batch.");
             return;
         }
 
@@ -133,7 +133,10 @@ public class SteamReviewSyncService {
             // 게임의 리뷰 통계와 최소 유용함 수가 일정 수치 이상인 리뷰들 수집
             SteamReviewResponse response = collector.collectRefinedReviews(appId);
 
-            if (response == null) return 0;
+            if (response == null) {
+                log.debug("No reviews found from Steam API for game: {}", gameTitle);
+                return 0;
+            }
 
             // TransactionTemplate로 내부 트랜잭션 생성 후 리뷰 데이터 저장
             Integer savedCount = transactionTemplate.execute(status -> {
@@ -142,7 +145,11 @@ public class SteamReviewSyncService {
                 return saveReviewData(managedGame, response);
             });
 
-            return savedCount != null ? savedCount : 0;
+            // 트랜잭션 정상 종료 시 건수 로깅
+            int finalCount = savedCount != null ? savedCount : 0;
+            log.debug("Persisted {} new reviews for game: {}", finalCount, gameTitle);
+
+            return finalCount;
 
         } catch (DataAccessException e) {
             // DB 오류: 제약조건 위반, 커넥션 문제 등 -> 에러 로그 남기고 스킵
@@ -278,7 +285,7 @@ public class SteamReviewSyncService {
                     totalSavedReviews.addAndGet(savedCount);
 
                     // 실시간 진행 상황 로깅
-                    log.info("[Steam Review] Game {}/{} processed. (New reviews saved: {})",
+                    log.debug("[Steam Review] Game {}/{} processed. (New reviews saved: {})",
                             currentCompleted, totalTarget, savedCount);
                 }, taskExecutor))
                 .toList();
@@ -291,10 +298,4 @@ public class SteamReviewSyncService {
 
         log.info("Batch Process Completed. Total new reviews saved across all threads: {}", totalSavedReviews.get());
     }
-//
-//    @PreDestroy
-//    public void cleanup() {
-//        // 애플리케이션 종료 시 스레드 풀도 우아하게 종료
-//        executorService.shutdown();
-//    }
 }

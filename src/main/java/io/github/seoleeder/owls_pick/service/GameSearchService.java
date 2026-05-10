@@ -35,7 +35,7 @@ public class GameSearchService {
      * 장르/테마 목록, DB에 저장된 게임 가격 범위, 플레이타입 범위
      */
     public SearchFilterMetadataResponse getSearchMetadata() {
-        log.info("Starting to fetch search filter metadata.");
+        log.debug("[GameSearch] Starting to fetch search filter metadata.");
 
         // Enum 기반 장르/테마 목록 추출
         List<SearchFilterMetadataResponse.GenreInfo> genres = Arrays.stream(GenreType.values())
@@ -50,7 +50,7 @@ public class GameSearchService {
         SearchFilterMetadataResponse.PriceRange priceRange = gameRepository.getPriceRange();
         SearchFilterMetadataResponse.PlaytimeRange playtimeRange = gameRepository.getPlaytimeRange();
 
-        log.info("Successfully fetched search metadata - Price: {}~{}, Playtime: {}~{}",
+        log.debug("[GameSearch] Successfully fetched search metadata - Price: {}~{}, Playtime: {}~{}",
                 priceRange.min(), priceRange.max(), playtimeRange.min(), playtimeRange.max());
 
         return SearchFilterMetadataResponse.builder()
@@ -67,7 +67,7 @@ public class GameSearchService {
      * @param pageable 페이징 및 정렬 정보
      */
     public Page<GameResponse> searchGames(GameSearchConditionRequest condition, Pageable pageable) {
-        log.info("Incoming game search request - keyword: [{}], condition: {}", condition.keyword(), condition);
+        log.debug("[GameSearch] Incoming game search request - keyword: [{}], condition: {}", condition.keyword(), condition);
 
         // 검색 필터 조건 유효성 검증
         validateSearchCondition(condition);
@@ -77,9 +77,9 @@ public class GameSearchService {
 
         // 조회 결과에 따른 로깅
         if (searchResult.isEmpty()) {
-            log.info("No games found matching the search condition. keyword: [{}]", condition.keyword());
+            log.debug("[GameSearch] No games found matching the search condition. keyword: [{}]", condition.keyword());
         } else {
-            log.info("Game search completed successfully - found {} games.", searchResult.getTotalElements());
+            log.debug("[GameSearch] Game search completed successfully - found {} games.", searchResult.getTotalElements());
         }
 
         // DTO 변환 및 반환 (최저가 조인 로직 포함)
@@ -92,19 +92,19 @@ public class GameSearchService {
     private void validateSearchCondition(GameSearchConditionRequest condition) {
         // 최소 가격이 최대 가격보다 논리적으로 큰 경우
         if (condition.minPrice() != null && condition.maxPrice() != null && condition.minPrice() > condition.maxPrice()) {
-            log.warn("Validation failed: Invalid price range - min: {}, max: {}", condition.minPrice(), condition.maxPrice());
+            log.warn("[GameSearch] Validation failed: Invalid price range - min: {}, max: {}", condition.minPrice(), condition.maxPrice());
             throw new CustomException(ErrorCode.INVALID_PRICE_RANGE);
         }
 
         // 최소 플레이타임이 최대 플레이타임보다 큰 경우
         if (condition.minPlaytime() != null && condition.maxPlaytime() != null && condition.minPlaytime() > condition.maxPlaytime()) {
-            log.warn("Validation failed: Invalid playtime range - min: {}, max: {}", condition.minPlaytime(), condition.maxPlaytime());
+            log.warn("[GameSearch] Validation failed: Invalid playtime range - min: {}, max: {}", condition.minPlaytime(), condition.maxPlaytime());
             throw new CustomException(ErrorCode.INVALID_PLAYTIME_RANGE);
         }
 
         // 검색어 길이 제한 (악의적인 검색 요청 방어)
         if (StringUtils.hasText(condition.keyword()) && condition.keyword().length() > 50) {
-            log.warn("Validation failed: Keyword length exceeded - length: {}", condition.keyword().length());
+            log.warn("[GameSearch] Validation failed: Keyword length exceeded - length: {}", condition.keyword().length());
             throw new CustomException(ErrorCode.SEARCH_KEYWORD_TOO_LONG);
         }
     }

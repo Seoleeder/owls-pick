@@ -40,17 +40,15 @@ public class IgdbSyncService {
     /**
      * 초기 대량 수집 메서드 (ID 기준)
      * 조건에 맞는 게임 데이터 수집
-     * ID = 0 부터 순차적으로 수집
+     * ID = 0 부터 순차적으로 수집하되, 중단 시 가장 마지막으로 저장된 ID부터 이어서 수집
      * */
     public void backfillAllGames() {
         log.info("Starting IGDB Full Backfill (ID based)...");
 
-//        //DB에서 가장 높은 IGDB ID를 조회해서 해당 위치부터 시작
-//        long lastId = gameRepository.findTopByOrderByIgdbIdDesc()
-//                .map(Game::getIgdbId)
-//                .orElse(0L);
-
-        long lastId = 0L;
+        //DB에서 가장 높은 IGDB ID를 조회해서 해당 위치부터 시작
+        long lastId = gameRepository.findTopByOrderByIgdbIdDesc()
+                .map(Game::getIgdbId)
+                .orElse(0L);
 
         log.info("Resuming backfill from ID: {}", lastId);
 
@@ -69,7 +67,7 @@ public class IgdbSyncService {
 
                 // 커서 업데이트 (마지막 ID)
                 lastId = summaries.getLast().igdbId();
-                log.info("Processed batch up to ID: {}", lastId);
+                log.debug("Processed batch up to ID: {}", lastId);
 
                 // Rate Limit 방지 (IGDB 정책 준수 - 초당 4회 제한)
                 sleep(250);
@@ -112,7 +110,7 @@ public class IgdbSyncService {
 
                 // 커서 업데이트 (마지막 수정 시간)
                 lastTimestamp = summaries.getLast().updatedAt();
-                log.info("Synced batch up to timestamp: {}", lastTimestamp);
+                log.debug("Synced batch up to timestamp: {}", lastTimestamp);
 
                 sleep(250);
 
@@ -172,6 +170,7 @@ public class IgdbSyncService {
             transactionTemplate.executeWithoutResult(status ->
                     syncDetails(finalSavedGames, finalDetails)
             );
+            log.debug("Successfully processed details for {} games in this batch.", finalSavedGames.size());
         } catch (Exception e) {
             log.error("Failed to save Game Details batch.", e);
         }

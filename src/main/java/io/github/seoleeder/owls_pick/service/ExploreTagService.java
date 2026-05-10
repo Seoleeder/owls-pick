@@ -73,6 +73,7 @@ public class ExploreTagService {
      * 특정 장르의 게임 조회 (Pagination, 정렬 조건 적용) -> 게임 응답 DTO 변환
      * */
     public Page<GameResponse> getGamesByGenre(GenreType genre, GameSortType sort, Pageable pageable) {
+        log.debug("[Explore] Fetching games by genre: {}, sort: {}, page: {}", genre, sort, pageable.getPageNumber());
         Page<GameWithReviewStatDto> genrePage = gameRepository.findGamesByGenre(genre, sort, pageable);
         return responseConverter.convertPage(genrePage);
     }
@@ -81,6 +82,7 @@ public class ExploreTagService {
      * 특정 장르의 게임 조회 (Pagination, 정렬 조건 적용) -> 게임 응답 DTO 변환
      * */
     public Page<GameResponse> getGamesByTheme(ThemeType theme, GameSortType sort, Pageable pageable) {
+        log.debug("[Explore] Fetching games by theme: {}, sort: {}, page: {}", theme, sort, pageable.getPageNumber());
         Page<GameWithReviewStatDto> themePage = gameRepository.findGamesByTheme(theme, sort, pageable);
         return responseConverter.convertPage(themePage);
     }

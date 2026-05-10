@@ -50,14 +50,14 @@ public class UserProfileService {
 
         // 이미 온보딩을 완료한 유저인지 검증
         if (user.isOnboarded()) {
-            log.warn("Onboarding failed: User {} is already onboarded.", userId);
+            log.warn("[Profile] Onboarding failed: User {} is already onboarded.", userId);
             throw new CustomException(ErrorCode.ALREADY_ONBOARDED);
         }
 
         // 닉네임 중복 검증
         if (!isNicknameAvailable(request.nickname())) {
-            log.warn("Onboarding failed: Nickname '{}' is already in use.", request.nickname());
-            throw new CustomException(ErrorCode.DUPLICATE_NICKNAME); // 예: 409 Conflict (에러 코드 추가 필요)
+            log.warn("[Profile] Onboarding failed: Nickname '{}' is already in use.", request.nickname());
+            throw new CustomException(ErrorCode.DUPLICATE_NICKNAME);
         }
 
         // 사용자의 생년월일, 선호 태그 및 스토어 정보 업데이트, 온보딩 완료 상태 변경
@@ -68,7 +68,7 @@ public class UserProfileService {
                 request.preferredStores()
         );
 
-        log.info("Successfully completed onboarding for User: {}", userId);
+        log.info("[Profile] Successfully completed onboarding for User: {}", userId);
     }
 
     // ------ 마이페이지 메서드 ------
@@ -109,13 +109,13 @@ public class UserProfileService {
         // 닉네임이 변경되었을 경우에만 중복 검사
         if (request.nickname() != null && !user.getNickname().equals(request.nickname())) {
             if (!isNicknameAvailable(request.nickname())) {
-                log.warn("Profile update failed: Nickname '{}' is already in use.", request.nickname());
+                log.warn("[Profile] Profile update failed: Nickname '{}' is already in use.", request.nickname());
                 throw new CustomException(ErrorCode.DUPLICATE_NICKNAME);
             }
         }
 
-        log.info("Successfully updated profile for User: {}", userId);
         user.updateProfile(request);
+        log.info("[Profile] Successfully updated profile for User: {}", userId);
     }
 
     @Transactional
@@ -127,12 +127,12 @@ public class UserProfileService {
 
         // 유저의 수신 동의 상태 변경
         user.updateDiscountNotification(isEnabled);
-        log.info("Toggled discount notification for User: {} to {}", userId, isEnabled);
+        log.info("[Profile] Toggled discount notification for User: {} to {}", userId, isEnabled);
 
         // 비동의 처리 시, 해당 유저의 모든 FCM 토큰 즉시 파기
         if (!isEnabled) {
             fcmTokenRepository.deleteAllByUserId(userId);
-            log.info("User {} revoked notification consent. All FCM tokens deleted.", userId);
+            log.info("[Profile] User {} revoked notification consent. All FCM tokens deleted.", userId);
         }
     }
 

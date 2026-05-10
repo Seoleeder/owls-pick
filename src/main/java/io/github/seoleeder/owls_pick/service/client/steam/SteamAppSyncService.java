@@ -35,7 +35,7 @@ public class SteamAppSyncService {
 
         // DB에 저장된 steam_app_id 조회
         Set<String> existingSteamIds = storeDetailRepository.findAllAppIdsByStore(StoreDetail.StoreName.STEAM);
-        log.info("Loaded {} existing Steam Ids from DB. ", existingSteamIds.size());
+        log.debug("Loaded {} existing Steam Ids from DB. ", existingSteamIds.size());
 
         Long lastAppId = null;
         boolean haveMoreResults = true;
@@ -66,6 +66,8 @@ public class SteamAppSyncService {
                             .filter(app -> app.name().length() <= 255)
                             .toList();
 
+                    log.debug("Fetched {} apps. Found {} new apps to save. (LastAppId: {})", apps.size(), newApps.size(), lastAppId);
+
                     // 새로운 게임이 있으면 저장 (Chunk 단위로 쪼개고, 저장 실패 시 문제되는 데이터 제외하고 개별 저장)
                     if (!newApps.isEmpty()) {
                         int chunkSize = 1000;
@@ -92,7 +94,7 @@ public class SteamAppSyncService {
                                         recoveredCount++;
                                     } catch (DataAccessException ex) {
                                         // DB 제약조건을 위반하는 데이터 감지 및 폐기
-                                        log.error("Bad data detected and discarded - AppID: {}, Name: {}", singleApp.appId(), singleApp.name());
+                                        log.warn("Bad data detected and discarded - AppID: {}, Name: {}", singleApp.appId(), singleApp.name());
                                     }
                                 }
                                 totalNewGames += recoveredCount;
@@ -158,6 +160,8 @@ public class SteamAppSyncService {
 
         // StoreDetail 일괄 저장
         storeDetailRepository.saveAll(detailsToSave);
+
+        log.debug("Successfully persisted {} games and store details.", newApps.size());
     }
 }
 

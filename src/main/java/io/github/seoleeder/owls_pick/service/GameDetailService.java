@@ -38,17 +38,17 @@ public class GameDetailService {
      * 특정 게임의 모든 상세 정보를 묶어서 반환
      */
     public GameDetailResponse getGameDetail(Long gameId, Long currentUserId) {
-        log.info("[GameDetailService] Start fetching details for Game ID: {}", gameId);
+        log.debug("[GameDetail] Start fetching details for Game ID: {}", gameId);
 
         // 게임 코어 데이터 조회 (게임, 태그, 리뷰 통계, 플레이타임)
         GameDetailCoreDto coreDto = gameRepository.findGameDetailCoreById(gameId)
                 .orElseThrow(() -> {
-                    log.error("[GameDetailService] Game not found with ID: {}", gameId);
+                    log.warn("[GameDetail] Game not found with ID: {}", gameId);
                     return new CustomException(ErrorCode.NOT_FOUND_GAME);
                 });
 
         // [1:N] 컬렉션 데이터 개별 조회
-        log.debug("[GameDetailService] Fetching sub-collections for Game ID: {}", gameId);
+        log.debug("[GameDetail] Fetching sub-collections for Game ID: {}", gameId);
         List<StoreDetail> stores = storeDetailRepository.findByGameId(gameId);
         List<LanguageSupport> languageSupports = languageSupportRepository.findByGameId(gameId);
         List<Screenshot> screenshots = screenshotRepository.findByGameId(gameId);
@@ -60,7 +60,7 @@ public class GameDetailService {
         long totalWishCount = wishlistRepository.countByGameId(gameId);
         boolean isWished = (currentUserId != null) && wishlistRepository.existsByGameIdAndUserId(gameId, currentUserId);
 
-        log.info("[GameDetailService] Successfully aggregated all data for Game: '{}'", coreDto.game().getTitle());
+        log.debug("[GameDetail] Successfully aggregated all data for Game: '{}'", coreDto.game().getTitle());
 
         // 4. 최종 조립 후 반환
         return buildResponse(coreDto, stores, languageSupports, gameCompanies, screenshots, totalWishCount, isWished);
