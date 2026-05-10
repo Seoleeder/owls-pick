@@ -5,9 +5,11 @@ import io.github.seoleeder.owls_pick.global.config.properties.SocialProperties;
 import io.github.seoleeder.owls_pick.global.response.CustomException;
 import io.github.seoleeder.owls_pick.global.response.ErrorCode;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class WebhookService {
@@ -25,9 +27,11 @@ public class WebhookService {
     public void handleKakaoUnlink(String authHeader, String providerId) {
         String expected = "KakaoAK " + socialProperties.registration().get("kakao").clientId();
         if (authHeader == null || !authHeader.equals(expected)) {
+            log.warn("[Webhook] KAKAO Unlink Request - Unauthorized attempt detected. Header mismatch for Provider ID: {}", providerId);
             throw new CustomException(ErrorCode.UNAUTHORIZED);
         }
         //사용자 회원 탈퇴 처리
+        log.debug("[Webhook] KAKAO Unlink Request - Authentication passed. Delegating to AuthService.");
         authService.unlinkSocialAccount("KAKAO", providerId);
     }
 
@@ -46,9 +50,12 @@ public class WebhookService {
             // 서명 검증과 provider Id 복호화
             String providerId = naverWebhookProcessor.process(clientId, encryptUniqueId, timestamp, signature, secret);
 
+            log.debug("[Webhook] NAVER Unlink Request - Signature verified. Delegating to AuthService.");
+
             //사용자 회원 탈퇴 처리
             authService.unlinkSocialAccount("NAVER", providerId);
         } catch (Exception e) {
+            log.warn("[Webhook] NAVER Unlink Request - Signature verification or decryption failed. Potential spoofing attempt.", e);
             throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
         }
     }

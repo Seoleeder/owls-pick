@@ -40,7 +40,7 @@ public class NotificationService {
                 .orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND_USER));
 
         if (!user.isDiscountNotificationEnabled()) {
-            log.warn("User {} has disabled notifications. Token registration rejected.", userId);
+            log.warn("[Notification] User {} has disabled notifications. Token registration rejected.", userId);
             throw new CustomException(ErrorCode.UNCONSENTED_NOTIFICATION);
         }
 
@@ -49,12 +49,12 @@ public class NotificationService {
                         existingToken -> {
                             // 토큰은 있는데, 다른 사용자인 경우 (기기 소유권 이전)
                             if (!existingToken.getUser().getId().equals(userId)) {
-                                log.info("Token owner changed from User {} to User {}", existingToken.getUser().getId(), userId);
+                                log.info("[Notification] Token owner changed from User {} to User {}", existingToken.getUser().getId(), userId);
                                 existingToken.updateOwner(user); // 연관 유저 변경 및 updatedAt 갱신
                             }
                             // 토큰도 있고, 같은 사용자인 경우 (단순 재등록/갱신)
                             else {
-                                log.info("Token already registered for User {}. Refreshing timestamp.", userId);
+                                log.debug("[Notification] Token already registered for User {}. Refreshing timestamp.", userId);
                                 existingToken.refresh(); // updatedAt만 임의로 갱신
                             }
                         },
@@ -63,7 +63,7 @@ public class NotificationService {
                                     .user(user)
                                     .token(token)
                                     .build());
-                            log.info("Registered new token for User: {}", userId);
+                            log.info("[Notification] Registered new token for User: {}", userId);
                         }
                 );
     }
@@ -102,7 +102,7 @@ public class NotificationService {
 
         // 알림 수신 비동의 상태이면, 그대로 리턴
         if (!user.isDiscountNotificationEnabled()) {
-            log.info("User {} opted out of discount alerts. Push and history logging aborted.", userId);
+            log.debug("[Notification] User {} opted out of discount alerts. Push and history logging aborted.", userId);
             return;
         }
 
@@ -122,7 +122,7 @@ public class NotificationService {
         // 푸시 전송 로직
         List<FcmToken> tokens = fcmTokenRepository.findAllByUserId(userId);
         if (tokens.isEmpty()) {
-            log.warn("No tokens for User: {}. Push aborted.", userId);
+            log.debug("[Notification] No tokens for User: {}. Push aborted.", userId);
             return;
         }
 
@@ -139,7 +139,7 @@ public class NotificationService {
             BatchResponse response = FirebaseMessaging.getInstance().sendEachForMulticast(message);
             cleanupInvalidTokens(response, tokenList);
         } catch (FirebaseMessagingException e) {
-            log.error("FCM send error: {}", e.getMessage());
+            log.error("[Notification] FCM send error: {}", e.getMessage());
             throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
         }
     }
@@ -163,7 +163,7 @@ public class NotificationService {
             }
             if (!invalidOnes.isEmpty()) {
                 fcmTokenRepository.deleteByTokenIn(invalidOnes);
-                log.info("Purged {} invalid tokens", invalidOnes.size());
+                log.info("[Notification] Purged {} invalid tokens", invalidOnes.size());
             }
         }
     }
@@ -182,7 +182,7 @@ public class NotificationService {
         }
 
         notificationHistoryRepository.delete(history);
-        log.info("User {} manually deleted notification {}", userId, notificationId);
+        log.info("[Notification] User {} manually deleted notification {}", userId, notificationId);
     }
 
     /**
@@ -195,6 +195,6 @@ public class NotificationService {
 
         // QueryDSL 삭제 로직 호출
         long deletedCount = notificationHistoryRepository.deleteExpiredNotifications(threshold);
-        log.info("Purged {} expired notifications. Threshold: {}", deletedCount, threshold);
+        log.info("[Notification] Purged {} expired notifications. Threshold: {}", deletedCount, threshold);
     }
 }

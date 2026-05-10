@@ -98,7 +98,7 @@ public class ItadSyncService {
                         .map(id -> "app/" + id)
                         .toList();
 
-                log.info(">> ITAD API Request: Fetching UUIDs for {} games...", formattedSteamIds.size());
+                log.debug(">> ITAD API Request: Fetching UUIDs for {} games...", formattedSteamIds.size());
                 long start = System.currentTimeMillis();
 
                 // ITAD ID 수집 API 호출
@@ -106,7 +106,7 @@ public class ItadSyncService {
                 ItadBulkResponse bulkResponse = collector.collectItadIdsBulk(steamShopId, formattedSteamIds);
 
                 long duration = System.currentTimeMillis() - start;
-                log.info("<< ITAD API Response: Received matches. (Duration: {}ms)", duration);
+                log.debug("<< ITAD API Response: Received matches. (Duration: {}ms)", duration);
 
                 // DB 업데이트 로직 호출 (transactionTemplate으로 내부 트랜잭션 적용)
                 Integer batchUpdated = transactionTemplate.execute(status -> updateItadIds(steamIdToGameMap, bulkResponse));
@@ -117,7 +117,7 @@ public class ItadSyncService {
 
                 totalAttempted += targetDetails.size();
 
-                log.info("Progress: Mapped {} new IDs in this batch. (Cumulative: {} / Attempted: {})",
+                log.debug("Progress: Mapped {} new IDs in this batch. (Cumulative: {} / Attempted: {})",
                         batchUpdated, totalUpdated, totalAttempted);
 
 
@@ -204,7 +204,7 @@ public class ItadSyncService {
                     totalUpdatedDetails.addAndGet(updatedCount);
 
                     // 실시간 로깅
-                    log.info("[ITAD Price Sync] Batch {}/{} completed. (Details updated: {})",
+                    log.debug("[ITAD Price Sync] Batch {}/{} completed. (Details updated: {})",
                             currentBatch, totalBatches, updatedCount);
                 }, taskExecutor))
                 .toList();
@@ -252,7 +252,7 @@ public class ItadSyncService {
         for (ItadPriceResponse priceResponse : prices) {
             List<Game> matchedGames = itadIdToGamesMap.get(priceResponse.id()); // Itad Id로 게임 찾기
             if (matchedGames == null || priceResponse.deals() == null){
-                log.warn("[DEBUG] No matched games in DB for ITAD ID: {}", priceResponse.id());
+                log.debug("No matched games in DB for ITAD ID: {}", priceResponse.id());
                 continue;
             }
 
@@ -333,7 +333,7 @@ public class ItadSyncService {
 
                 // 실질적인 데이터 변경이 발생한 경우에만 엔티티 상태 갱신 및 리스트에 추가
                 if (!isSame) {
-                    log.info("[TARGET-ALIVE] Found changes for: {} (Store: {})", game.getTitle(), storeName);
+                    log.debug("[TARGET-ALIVE] Found changes for: {} (Store: {})", game.getTitle(), storeName);
                     storeDetail.updatePriceInfo(currentPrice, originalPrice, historicalLow, cut, expiryKst, urlToSave);
                     detailsToSave.add(storeDetail);
                 }
@@ -343,7 +343,7 @@ public class ItadSyncService {
         // 변경된 데이터만 일괄 저장
         if (!detailsToSave.isEmpty()) {
             storeDetailRepository.saveAll(detailsToSave);
-            log.info("[DEBUG] Successfully saved {} details to DB", detailsToSave.size());
+            log.info("Successfully saved {} details to DB", detailsToSave.size());
         }
 
         return detailsToSave.size();

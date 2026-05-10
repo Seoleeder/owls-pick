@@ -57,7 +57,7 @@ public class WishlistService {
                     wishlistRepository.flush(); // 카운트 조회를 위해 DB 즉시 동기화
 
                     long totalCount = wishlistRepository.countByGameId(gameId);
-                    log.info("Removed from wishlist - userId: {}, gameId: {}, current total: {}", userId, gameId, totalCount);
+                    log.info("[Wishlist] Removed from wishlist - userId: {}, gameId: {}, current total: {}", userId, gameId, totalCount);
 
                     return WishlistToggleResponse.builder()
                             .isWished(false)
@@ -80,7 +80,7 @@ public class WishlistService {
                     wishlistRepository.flush(); // 카운트 조회를 위해 DB 즉시 동기화
 
                     long totalCount = wishlistRepository.countByGameId(gameId);
-                    log.info("Added to wishlist - userId: {}, gameId: {}, current total: {}", userId, gameId, totalCount);
+                    log.info("[Wishlist] Added to wishlist - userId: {}, gameId: {}, current total: {}", userId, gameId, totalCount);
 
                     return WishlistToggleResponse.builder()
                             .isWished(true)
@@ -138,7 +138,7 @@ public class WishlistService {
 
         wishlistRepository.deleteById(wishlistId);
 
-        log.info("Explicitly removed from wishlist in My Page - userId: {}, gameId: {}", userId, gameId);
+        log.info("[Wishlist] Explicitly removed from wishlist in My Page - userId: {}, gameId: {}", userId, gameId);
     }
 
 }

@@ -75,7 +75,7 @@ public class HltbSyncService {
 
             // 누적 카운트 업데이트
             totalProcessedCount += targets.size();
-            log.info("[HLTB Sync] Successfully processed chunk of {} games. (Cumulative Total: {})",
+            log.debug("[HLTB Sync] Successfully processed chunk of {} games. (Cumulative Total: {})",
                     targets.size(), totalProcessedCount);
         }
 
@@ -116,6 +116,8 @@ public class HltbSyncService {
 
             // 정상 수집된 플레이타임 데이터 DB 업데이트
             transactionTemplate.executeWithoutResult(status -> updatePlaytime(game, response));
+
+            log.debug("[HLTB Sync] Playtime successfully updated for game: {}", game.getTitle());
         } catch (Exception e) {
             log.error("[HLTB Sync] Failed to sync game [{}]: {}", game.getTitle(), e.getMessage());
 
@@ -163,7 +165,7 @@ public class HltbSyncService {
         // FastAPI가 SUCCESS를 리턴했어도, 실제 데이터가 없으면 NO_DATA로 상태 보정
         SyncStatus finalStatus = response.status();
         if (finalStatus == SyncStatus.SUCCESS && hasNoData) {
-            log.info("[HLTB Sync] Game [{}] found on HLTB, but no playtime data exists. Marked as NO_DATA.", game.getTitle());
+            log.debug("[HLTB Sync] Game [{}] found on HLTB, but no playtime data exists. Marked as NO_DATA.", game.getTitle());
             finalStatus = SyncStatus.NO_DATA;
         }
 
@@ -194,24 +196,4 @@ public class HltbSyncService {
         playtimeRepository.save(playtime);
     }
 }
-//    /**
-//     * 스프링 컨텍스트 종료 시 가상 스레드 풀 자원 반환
-//     */
-//    @PreDestroy
-//    public void shutdownExecutor() {
-//        log.info("[HLTB Sync] Shutting down HLTB Sync ExecutorService...");
-//
-//        // 새로운 작업 수락 중단
-//        executorService.shutdown();
-//
-//        try {
-//            // 5초 대기 후 남은 작업 강제 종료
-//            if (!executorService.awaitTermination(5, TimeUnit.SECONDS)) {
-//                executorService.shutdownNow();
-//            }
-//        } catch (InterruptedException e) {
-//            executorService.shutdownNow();
-//            Thread.currentThread().interrupt();
-//        }
-//    }
 

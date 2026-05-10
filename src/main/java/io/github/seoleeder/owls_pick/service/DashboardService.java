@@ -25,6 +25,7 @@ import java.util.Map;
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@Transactional(readOnly = true)
 public class DashboardService {
 
     private final RedisTemplate<String, Object> redisTemplate;
@@ -52,11 +53,11 @@ public class DashboardService {
             LocalDateTime exactDate = dashboardRepository.findClosestReferenceAt(type, targetDate);
 
             if (exactDate == null) {
-                log.warn("No dashboard data found near requested date. Date: {}, Type: {}", targetDate, type);
+                log.warn("[Dashboard] No dashboard data found near requested date. Date: {}, Type: {}", targetDate, type);
                 return new DashboardResponse(type.name(), targetDate, null, null, Collections.emptyList());
             }
 
-            log.info("Fetched historical dashboard data from DB. Type: {}, Requested: {}, Exact: {}", type, targetDate, exactDate);
+            log.debug("[Dashboard] Fetched historical dashboard data from DB. Type: {}, Requested: {}, Exact: {}", type, targetDate, exactDate);
 
             // 보정된 정확한 시각으로 데이터 조회
             return fetchFromDb(type, exactDate, limit);
@@ -68,18 +69,18 @@ public class DashboardService {
             Object cached = redisTemplate.opsForValue().get(key);
 
             if (cached != null) {
-                log.info("Dashboard cache hit. Type: {}", type);
+                log.debug("[Dashboard] Cache hit. Type: {}", type);
                 // Redis에 저장된 객체를 DTO로 안전하게 역직렬화
                 return objectMapper.convertValue(cached, DashboardResponse.class);
             }
         } catch (Exception e) {
-            log.error("Failed to fetch dashboard cache from Redis. Type: {}", type, e);
+            log.error("[Dashboard] Failed to fetch cache from Redis. Type: {}", type, e);
             throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
         }
 
 
         // 캐시 미스 시 DB의 최신 데이터를 조회하고 Redis에 업데이트 후 반환
-        log.info("Dashboard cache miss. Fetching from DB and updating cache. Type: {}", type);
+        log.debug("[Dashboard] Cache miss. Fetching from DB and updating cache. Type: {}", type);
         return refreshCache(type);
     }
 
@@ -87,15 +88,14 @@ public class DashboardService {
      * DB에 저장된 가장 최근의 대시보드 데이터를 기반으로 Redis 캐시 최신화
      * @param type 갱신할 큐레이션 타입
      */
-    @Transactional(readOnly = true)
     public DashboardResponse refreshCache(CurationType type) {
-        log.info("Refreshing Dashboard Cache for type: {}", type);
+        log.debug("[Dashboard] Refreshing cache for type: {}", type);
 
         // 해당 큐레이션 타입의 가장 최근 수집 시각 조회
         LocalDateTime latestDate = dashboardRepository.findLatestReferenceAt(type);
 
         if (latestDate == null) {
-            log.warn("Cannot refresh cache. No latest reference date found for type: {}", type);
+            log.warn("[Dashboard] Cannot refresh cache. No latest reference date found for type: {}", type);
             return new DashboardResponse(type.name(), null, null, null, Collections.emptyList());
         }
 
@@ -105,9 +105,9 @@ public class DashboardService {
         // 완성된 대시보드 응답을 Redis에 저장 (TTL 30분)
         try {
             redisTemplate.opsForValue().set(getCacheKey(type), response, CACHE_TTL);
-            log.info("Redis Cache Updated Successfully for type: {}", type);
+            log.debug("[Dashboard] Redis cache updated successfully. Type: {}", type);
         } catch (Exception e) {
-            log.error("Failed to update Redis cache. Type: {}", type, e);
+            log.error("[Dashboard] Failed to update Redis cache. Type: {}", type, e);
         }
 
         return response;

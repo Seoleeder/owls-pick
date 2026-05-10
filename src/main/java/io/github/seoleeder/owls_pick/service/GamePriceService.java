@@ -45,7 +45,7 @@ public class GamePriceService {
                     ));
         } catch (Exception e) {
             // 가격 조회 실패 시 로그만 남기고 빈 데이터 반환
-            log.error("[GamePriceService] Exception occurred while fetching lowest prices. Falling back to empty data. Reason: {}", e.getMessage(), e);
+            log.warn("[GamePriceService] Exception occurred while fetching lowest prices. Falling back to empty data. Reason: {}", e.getMessage(), e);
             return Collections.emptyMap();
         }
     }
