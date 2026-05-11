@@ -57,9 +57,8 @@ class ItadSyncServiceTest {
                 gameRepository,
                 storeDetailRepository,
                 new TaskExecutorAdapter(new SyncTaskExecutor()),
-                transactionTemplate,
-                props
-        );
+                transactionTemplate, ,
+                props);
     }
 
     @Test

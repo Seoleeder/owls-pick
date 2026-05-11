@@ -14,6 +14,7 @@ import java.util.List;
 
 import static io.github.seoleeder.owls_pick.entity.game.QGame.game;
 import static io.github.seoleeder.owls_pick.entity.game.QReviewStat.reviewStat;
+import static io.github.seoleeder.owls_pick.entity.user.QUser.user;
 import static io.github.seoleeder.owls_pick.entity.user.QWishlist.wishlist;
 
 @RequiredArgsConstructor
@@ -45,6 +46,19 @@ public class WishlistRepositoryImpl implements WishlistRepositoryCustom {
                 .where(wishlist.user.id.eq(userId));
 
         return PageableExecutionUtils.getPage(content, pageable, countQuery::fetchOne);
+    }
+
+    @Override
+    public List<Long> findTargetUserIdsForDiscountPush(Long gameId) {
+        return queryFactory
+                .select(wishlist.id.userId)
+                .from(wishlist)
+                .join(wishlist.user, user)
+                .where(
+                        wishlist.id.gameId.eq(gameId),
+                        user.isDiscountNotificationEnabled.isTrue()
+                )
+                .fetch();
     }
 }
 
