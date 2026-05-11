@@ -8,10 +8,12 @@ import io.github.seoleeder.owls_pick.global.config.properties.ItadProperties;
 import io.github.seoleeder.owls_pick.entity.game.Game;
 import io.github.seoleeder.owls_pick.entity.game.StoreDetail;
 import io.github.seoleeder.owls_pick.entity.game.StoreDetail.StoreName;
+import io.github.seoleeder.owls_pick.global.event.GameDiscountEvent;
 import io.github.seoleeder.owls_pick.repository.GameRepository;
 import io.github.seoleeder.owls_pick.repository.StoreDetailRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -35,6 +37,8 @@ public class ItadSyncService {
     private final AsyncTaskExecutor taskExecutor;
     private final TransactionTemplate transactionTemplate;
 
+    private final ApplicationEventPublisher eventPublisher;
+
     private final ItadProperties props;
 
     private static final String NOT_FOUND = "NONE";
@@ -46,12 +50,14 @@ public class ItadSyncService {
             StoreDetailRepository storeDetailRepository,
             @Qualifier("applicationTaskExecutor") AsyncTaskExecutor taskExecutor,
             TransactionTemplate transactionTemplate,
+            ApplicationEventPublisher eventPublisher,
             ItadProperties props) {
         this.collector = collector;
         this.gameRepository = gameRepository;
         this.storeDetailRepository = storeDetailRepository;
         this.taskExecutor = taskExecutor;
         this.transactionTemplate = transactionTemplate;
+        this.eventPublisher = eventPublisher;
         this.props = props;
     }
 
@@ -336,6 +342,13 @@ public class ItadSyncService {
                     log.debug("[TARGET-ALIVE] Found changes for: {} (Store: {})", game.getTitle(), storeName);
                     storeDetail.updatePriceInfo(currentPrice, originalPrice, historicalLow, cut, expiryKst, urlToSave);
                     detailsToSave.add(storeDetail);
+
+                    // 실질적인 할인이 감지되었을 때(할인율 > 0) 비동기 알림 이벤트 발행
+                    if (cut > 0) {
+                        eventPublisher.publishEvent(
+                                new GameDiscountEvent(game.getId(), cut, expiryKst)
+                        );
+                    }
                 }
             }
         }
