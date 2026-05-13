@@ -34,6 +34,7 @@ public enum ErrorCode {
     // 403 Forbidden
     FORBIDDEN(40300,HttpStatus.FORBIDDEN, "금지된 요청입니다."),
     UNCONSENTED_NOTIFICATION(40301,HttpStatus.FORBIDDEN, "알림 수신에 동의하지 않은 사용자입니다."),
+    NOT_SESSION_OWNER(40302, HttpStatus.FORBIDDEN, "해당 채팅 세션에 대한 권한이 없습니다."),
 
 
     // 404 Not Found

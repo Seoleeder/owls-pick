@@ -1,12 +1,10 @@
 package io.github.seoleeder.owls_pick.service.genai;
 
-import io.github.seoleeder.owls_pick.dto.request.chat.ChatHistoryDto;
-import io.github.seoleeder.owls_pick.dto.request.chat.ChatRequest;
-import io.github.seoleeder.owls_pick.dto.request.chat.QueryEmbeddingRequest;
-import io.github.seoleeder.owls_pick.dto.request.chat.RagGenerationRequest;
+import io.github.seoleeder.owls_pick.dto.request.chat.*;
 import io.github.seoleeder.owls_pick.dto.response.chat.ChatResponse;
 import io.github.seoleeder.owls_pick.dto.response.chat.QueryEmbeddingResponse;
 import io.github.seoleeder.owls_pick.dto.response.chat.RagGenerationResponse;
+import io.github.seoleeder.owls_pick.dto.response.chat.TitleGenerationResponse;
 import io.github.seoleeder.owls_pick.entity.game.VectorEmbedding;
 import io.github.seoleeder.owls_pick.entity.user.ChatMessage;
 import io.github.seoleeder.owls_pick.entity.user.ChatMessage.ChatRole;
@@ -23,6 +21,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
@@ -42,6 +41,8 @@ public class ChatService {
     private final TransactionTemplate transactionTemplate;
     private final RestClient restClient;
     private final GenaiProperties props;
+
+    private static final int MAX_TITLE_LENGTH = 30; // 세션 타이틀 최대 길이
 
     public ChatService(
             ChatSessionRepository chatSessionRepository,
@@ -142,16 +143,61 @@ public class ChatService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND_USER));
 
-        // 세션 타이틀 생성 (TODO: AI 기반 요약 연동 예정)
-        String title = request.userMessage().length() > 25
-                ? request.userMessage().substring(0, 25) + "..."
-                : request.userMessage();
+
+        // 사용자의 첫 발화를 기반으로 세션 타이틀 생성
+        String title = fetchGeneratedTitle(request.userMessage());
 
         // 신규 세션 저장
         return chatSessionRepository.save(ChatSession.builder()
                 .user(user)
                 .title(title)
                 .build());
+    }
+
+    /**
+     * FastAPI 기반 세션 타이틀 요약 요청 및 반환
+     */
+    private String fetchGeneratedTitle(String userMessage) {
+        try {
+            TitleGenerationResponse response = restClient.post()
+                    .uri(props.fastapiUrl() + "/api/genai/chat/title/generate")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(new TitleGenerationRequest(userMessage))
+                    .retrieve()
+                    .body(TitleGenerationResponse.class);
+
+            if (response != null && response.title() != null && !response.title().isBlank()) {
+                // 세션 타이틀 최대 길이 제한 적용
+                return response.title().length() > MAX_TITLE_LENGTH
+                        ? response.title().substring(0, MAX_TITLE_LENGTH - 3) + "..."
+                        : response.title();
+            }
+        } catch (RestClientException e) {
+            log.warn("[ChatService] Failed to generate title from FastAPI, using fallback logic. Error: {}", e.getMessage());
+        }
+
+        // 통신 실패 시 원본 메시지 기준 최대 길이 제한 적용
+        return userMessage.length() > MAX_TITLE_LENGTH
+                ? userMessage.substring(0, MAX_TITLE_LENGTH - 3) + "..."
+                : userMessage;
+    }
+
+    /**
+     *  채팅 세션 타이틀 수동 변경
+     */
+    @Transactional
+    public void updateSessionTitle(Long userId, Long sessionId, String newTitle) {
+        ChatSession session = chatSessionRepository.findById(sessionId)
+                .orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND_SESSION));
+
+        // 세션 소유자 일치 여부 확인 (인가 검증)
+        if (!session.getUser().getId().equals(userId)) {
+            log.warn("[ChatService] Forbidden access attempt. UserId: {}, SessionId: {}", userId, sessionId);
+            throw new CustomException(ErrorCode.NOT_SESSION_OWNER);
+        }
+
+        session.updateTitle(newTitle);
+        log.info("[ChatService] Session title updated. SessionId: {}, NewTitle: {}", sessionId, newTitle);
     }
 
     /**
@@ -216,7 +262,7 @@ public class ChatService {
     private String fetchGeneratedChat(List<ChatHistoryDto> history, String userMessage, List<String> contexts) {
         try {
             RagGenerationResponse response = restClient.post()
-                    .uri(props.fastapiUrl() + "/api/genai/chat/generate")
+                    .uri(props.fastapiUrl() + "/api/genai/chat/title/generate")
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(new RagGenerationRequest(history, userMessage, contexts))
                     .retrieve()
