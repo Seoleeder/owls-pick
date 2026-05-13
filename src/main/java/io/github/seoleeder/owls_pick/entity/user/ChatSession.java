@@ -41,4 +41,11 @@ public class ChatSession {
     public void preUpdate() {
         this.updatedAt = LocalDateTime.now();
     }
+
+    /**
+     * 세션 제목 수동 변경 로직
+     */
+    public void updateTitle(String newTitle) {
+        this.title = newTitle;
+    }
 }
