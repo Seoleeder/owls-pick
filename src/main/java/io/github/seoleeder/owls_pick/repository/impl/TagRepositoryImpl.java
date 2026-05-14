@@ -1,11 +1,10 @@
-package io.github.seoleeder.owls_pick.repository.Impl;
+package io.github.seoleeder.owls_pick.repository.impl;
 
 import com.querydsl.core.types.dsl.Expressions;
 import com.querydsl.core.types.dsl.StringTemplate;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import io.github.seoleeder.owls_pick.entity.game.Tag;
-import io.github.seoleeder.owls_pick.repository.Custom.TagRepositoryCustom;
-import io.github.seoleeder.owls_pick.repository.support.GameExpressions;
+import io.github.seoleeder.owls_pick.repository.custom.TagRepositoryCustom;
 import io.github.seoleeder.owls_pick.repository.support.LocalizationExpressions;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;

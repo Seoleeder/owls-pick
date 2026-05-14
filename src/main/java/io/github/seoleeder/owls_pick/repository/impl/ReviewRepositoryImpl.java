@@ -1,8 +1,8 @@
-package io.github.seoleeder.owls_pick.repository.Impl;
+package io.github.seoleeder.owls_pick.repository.impl;
 
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import io.github.seoleeder.owls_pick.entity.game.Review;
-import io.github.seoleeder.owls_pick.repository.Custom.ReviewRepositoryCustom;
+import io.github.seoleeder.owls_pick.repository.custom.ReviewRepositoryCustom;
 import lombok.RequiredArgsConstructor;
 
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;

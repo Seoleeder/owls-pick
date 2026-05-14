@@ -1,4 +1,4 @@
-package io.github.seoleeder.owls_pick.repository.Impl;
+package io.github.seoleeder.owls_pick.repository.impl;
 
 import com.querydsl.core.Tuple;
 import com.querydsl.core.types.Projections;
@@ -9,7 +9,7 @@ import io.github.seoleeder.owls_pick.dto.request.GameSearchConditionRequest;
 import io.github.seoleeder.owls_pick.dto.response.SearchFilterMetadataResponse;
 import io.github.seoleeder.owls_pick.entity.game.Game;
 import io.github.seoleeder.owls_pick.entity.game.enums.GameSortType;
-import io.github.seoleeder.owls_pick.repository.Custom.GameRepositoryCustom;
+import io.github.seoleeder.owls_pick.repository.custom.GameRepositoryCustom;
 import io.github.seoleeder.owls_pick.repository.dto.GameDetailCoreDto;
 import io.github.seoleeder.owls_pick.repository.dto.GameWithReviewStatDto;
 import io.github.seoleeder.owls_pick.entity.game.enums.GenreType;

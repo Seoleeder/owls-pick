@@ -3,7 +3,7 @@ package io.github.seoleeder.owls_pick.repository;
 
 import io.github.seoleeder.owls_pick.entity.user.Wishlist;
 import io.github.seoleeder.owls_pick.entity.user.WishlistId;
-import io.github.seoleeder.owls_pick.repository.Custom.WishlistRepositoryCustom;
+import io.github.seoleeder.owls_pick.repository.custom.WishlistRepositoryCustom;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 

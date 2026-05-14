@@ -1,4 +1,4 @@
-package io.github.seoleeder.owls_pick.repository.Custom;
+package io.github.seoleeder.owls_pick.repository.custom;
 
 
 import io.github.seoleeder.owls_pick.entity.game.StoreDetail;

@@ -1,9 +1,9 @@
-package io.github.seoleeder.owls_pick.repository.Impl;
+package io.github.seoleeder.owls_pick.repository.impl;
 
 import com.querydsl.core.types.Projections;
 import com.querydsl.jpa.impl.JPAQuery;
 import com.querydsl.jpa.impl.JPAQueryFactory;
-import io.github.seoleeder.owls_pick.repository.Custom.WishlistRepositoryCustom;
+import io.github.seoleeder.owls_pick.repository.custom.WishlistRepositoryCustom;
 import io.github.seoleeder.owls_pick.repository.dto.WishlistQueryDto;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;

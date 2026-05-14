@@ -1,7 +1,7 @@
-package io.github.seoleeder.owls_pick.repository.Impl;
+package io.github.seoleeder.owls_pick.repository.impl;
 
 import com.querydsl.jpa.impl.JPAQueryFactory;
-import io.github.seoleeder.owls_pick.repository.Custom.NotificationHistoryRepositoryCustom;
+import io.github.seoleeder.owls_pick.repository.custom.NotificationHistoryRepositoryCustom;
 import lombok.RequiredArgsConstructor;
 import java.time.LocalDateTime;
 

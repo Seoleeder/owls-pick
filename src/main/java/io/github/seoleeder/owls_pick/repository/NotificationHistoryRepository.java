@@ -1,7 +1,7 @@
 package io.github.seoleeder.owls_pick.repository;
 
 import io.github.seoleeder.owls_pick.entity.notification.NotificationHistory;
-import io.github.seoleeder.owls_pick.repository.Custom.NotificationHistoryRepositoryCustom;
+import io.github.seoleeder.owls_pick.repository.custom.NotificationHistoryRepositoryCustom;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;

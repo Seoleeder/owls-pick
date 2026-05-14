@@ -1,4 +1,4 @@
-package io.github.seoleeder.owls_pick.repository.Impl;
+package io.github.seoleeder.owls_pick.repository.impl;
 
 import com.querydsl.jpa.JPAExpressions;
 import java.time.Duration;
@@ -7,7 +7,7 @@ import io.github.seoleeder.owls_pick.entity.game.Dashboard;
 import io.github.seoleeder.owls_pick.entity.game.Dashboard.CurationType;
 import io.github.seoleeder.owls_pick.entity.game.QDashboard;
 import io.github.seoleeder.owls_pick.entity.game.QGame;
-import io.github.seoleeder.owls_pick.repository.Custom.DashboardRepositoryCustom;
+import io.github.seoleeder.owls_pick.repository.custom.DashboardRepositoryCustom;
 import lombok.RequiredArgsConstructor;
 
 import java.time.LocalDateTime;

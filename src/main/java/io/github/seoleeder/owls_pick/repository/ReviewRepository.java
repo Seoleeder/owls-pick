@@ -1,11 +1,9 @@
 package io.github.seoleeder.owls_pick.repository;
 
 import io.github.seoleeder.owls_pick.entity.game.Review;
-import io.github.seoleeder.owls_pick.repository.Custom.ReviewRepositoryCustom;
+import io.github.seoleeder.owls_pick.repository.custom.ReviewRepositoryCustom;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
-
-import java.util.Optional;
 
 @Repository
 public interface ReviewRepository extends JpaRepository<Review, Long>, ReviewRepositoryCustom {

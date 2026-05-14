@@ -1,4 +1,4 @@
-package io.github.seoleeder.owls_pick.service.genai;
+package io.github.seoleeder.owls_pick.service.genai.chat;
 
 import io.github.seoleeder.owls_pick.dto.request.chat.*;
 import io.github.seoleeder.owls_pick.dto.response.chat.ChatResponse;

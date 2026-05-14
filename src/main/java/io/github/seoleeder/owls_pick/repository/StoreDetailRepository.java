@@ -3,7 +3,7 @@ package io.github.seoleeder.owls_pick.repository;
 import io.github.seoleeder.owls_pick.entity.game.Game;
 import io.github.seoleeder.owls_pick.entity.game.StoreDetail;
 import io.github.seoleeder.owls_pick.entity.game.StoreDetail.StoreName;
-import io.github.seoleeder.owls_pick.repository.Custom.StoreDetailRepositoryCustom;
+import io.github.seoleeder.owls_pick.repository.custom.StoreDetailRepositoryCustom;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 

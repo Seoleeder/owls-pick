@@ -1,4 +1,4 @@
-package io.github.seoleeder.owls_pick.repository.Custom;
+package io.github.seoleeder.owls_pick.repository.custom;
 
 import java.time.LocalDateTime;
 
