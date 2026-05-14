@@ -2,7 +2,7 @@ package io.github.seoleeder.owls_pick.repository;
 
 import io.github.seoleeder.owls_pick.entity.game.Dashboard;
 import io.github.seoleeder.owls_pick.entity.game.Dashboard.CurationType;
-import io.github.seoleeder.owls_pick.repository.Custom.DashboardRepositoryCustom;
+import io.github.seoleeder.owls_pick.repository.custom.DashboardRepositoryCustom;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 

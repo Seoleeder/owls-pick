@@ -1,8 +1,8 @@
-package io.github.seoleeder.owls_pick.repository.Impl;
+package io.github.seoleeder.owls_pick.repository.impl;
 
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import io.github.seoleeder.owls_pick.entity.game.StoreDetail;
-import io.github.seoleeder.owls_pick.repository.Custom.StoreDetailRepositoryCustom;
+import io.github.seoleeder.owls_pick.repository.custom.StoreDetailRepositoryCustom;
 import lombok.RequiredArgsConstructor;
 
 import java.util.HashSet;

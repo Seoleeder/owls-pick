@@ -1,8 +1,8 @@
-package io.github.seoleeder.owls_pick.repository.Impl;
+package io.github.seoleeder.owls_pick.repository.impl;
 
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import io.github.seoleeder.owls_pick.entity.game.VectorEmbedding;
-import io.github.seoleeder.owls_pick.repository.Custom.VectorEmbeddingRepositoryCustom;
+import io.github.seoleeder.owls_pick.repository.custom.VectorEmbeddingRepositoryCustom;
 import io.github.seoleeder.owls_pick.repository.support.EmbeddingExpressions;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;

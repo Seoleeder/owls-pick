@@ -1,8 +1,8 @@
-package io.github.seoleeder.owls_pick.repository.Impl;
+package io.github.seoleeder.owls_pick.repository.impl;
 
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import io.github.seoleeder.owls_pick.entity.game.KeywordDictionary;
-import io.github.seoleeder.owls_pick.repository.Custom.KeywordDictionaryRepositoryCustom;
+import io.github.seoleeder.owls_pick.repository.custom.KeywordDictionaryRepositoryCustom;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 

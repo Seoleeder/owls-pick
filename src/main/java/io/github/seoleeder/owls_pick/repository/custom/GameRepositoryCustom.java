@@ -1,6 +1,5 @@
-package io.github.seoleeder.owls_pick.repository.Custom;
+package io.github.seoleeder.owls_pick.repository.custom;
 
-import io.github.seoleeder.owls_pick.dto.embedding.EmbeddingBatchRequest;
 import io.github.seoleeder.owls_pick.dto.embedding.EmbeddingSourceDto;
 import io.github.seoleeder.owls_pick.dto.request.GameSearchConditionRequest;
 import io.github.seoleeder.owls_pick.dto.response.SearchFilterMetadataResponse;

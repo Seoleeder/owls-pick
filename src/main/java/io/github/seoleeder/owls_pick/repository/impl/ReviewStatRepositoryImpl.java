@@ -1,8 +1,8 @@
-package io.github.seoleeder.owls_pick.repository.Impl;
+package io.github.seoleeder.owls_pick.repository.impl;
 
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import io.github.seoleeder.owls_pick.entity.game.ReviewStat;
-import io.github.seoleeder.owls_pick.repository.Custom.ReviewStatRepositoryCustom;
+import io.github.seoleeder.owls_pick.repository.custom.ReviewStatRepositoryCustom;
 import lombok.RequiredArgsConstructor;
 
 import java.time.LocalDateTime;

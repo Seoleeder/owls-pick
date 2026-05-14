@@ -1,7 +1,7 @@
 package io.github.seoleeder.owls_pick.repository;
 
 import io.github.seoleeder.owls_pick.entity.game.Game;
-import io.github.seoleeder.owls_pick.repository.Custom.GameRepositoryCustom;
+import io.github.seoleeder.owls_pick.repository.custom.GameRepositoryCustom;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
