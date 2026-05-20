@@ -9,6 +9,7 @@ import io.github.seoleeder.owls_pick.dto.request.GameSearchConditionRequest;
 import io.github.seoleeder.owls_pick.dto.response.SearchFilterMetadataResponse;
 import io.github.seoleeder.owls_pick.entity.game.Game;
 import io.github.seoleeder.owls_pick.entity.game.enums.GameSortType;
+import io.github.seoleeder.owls_pick.global.util.RestPage;
 import io.github.seoleeder.owls_pick.repository.custom.GameRepositoryCustom;
 import io.github.seoleeder.owls_pick.repository.dto.GameDetailCoreDto;
 import io.github.seoleeder.owls_pick.repository.dto.GameWithReviewStatDto;
@@ -18,6 +19,7 @@ import io.github.seoleeder.owls_pick.repository.support.EmbeddingExpressions;
 import io.github.seoleeder.owls_pick.repository.support.GameExpressions;
 import io.github.seoleeder.owls_pick.repository.support.LocalizationExpressions;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.support.PageableExecutionUtils;
@@ -176,8 +178,10 @@ public class GameRepositoryImpl implements GameRepositoryCustom {
 
     /**
      * 사용자의 선호 태그 정보를 반영한 맞춤형 최적 게임 리스트 조회
-     * */
+     * 매개변수로 전달된 정렬된 태그 조합을 캐시 키로 활용 (TTL 30분)
+     */
     @Override
+    @Cacheable(value = "main_pick:personal", key = "#userTags + ':' + #pageable.pageNumber")
     public Page<GameWithReviewStatDto> findPersonalizedGamesByPreferredTags(List<String> userTags, Pageable pageable) {
         // 유저 태그 리스트를 PostgreSQL 배열 규격에 맞게 변환
         String[] tags = userTags.toArray(new String[0]);
@@ -215,8 +219,11 @@ public class GameRepositoryImpl implements GameRepositoryCustom {
                         gameExpressions.isReleased()
                 );
 
-        // PageableExecutionUtils를 사용하여 Page 객체 생성
-        return PageableExecutionUtils.getPage(content, pageable, countQuery::fetchOne);
+        // 페이징 처리된 조회 결과 원본 객체 생성
+        Page<GameWithReviewStatDto> page = PageableExecutionUtils.getPage(content, pageable, countQuery::fetchOne);
+
+        // Redis 역직렬화 호환성을 위해 RestPage 타입으로 래핑 후 반환
+        return new RestPage<>(page);
     }
 
     /**
@@ -250,14 +257,16 @@ public class GameRepositoryImpl implements GameRepositoryCustom {
                         gameExpressions.isReleased()
                 );
 
+        // PageableExecutionUtils를 사용하여 Page 객체 생성
         return PageableExecutionUtils.getPage(content, pageable, countQuery::fetchOne);
     }
 
     /**
      * 스팀의 숨겨진 명작 게임 조회
-     * (리뷰 스코어 + 리뷰 수 로 필터링, 리뷰 스코어가 높은데 리뷰 수가 상대적으로 적은 게임들)
-     * */
+     * (리뷰 스코어 + 리뷰 수 로 필터링, 리뷰 스코어가 높으나 전체 리뷰 수가 상대적으로 적은 게임. TTL 24시간)
+     */
     @Override
+    @Cacheable(value = "main_pick:hidden_masterpiece", key = "#pageable.pageNumber")
     public Page<GameWithReviewStatDto> findHiddenMasterpieces(int minScore, int minReviews, int maxReviews, Pageable pageable) {
         List<GameWithReviewStatDto> content = queryFactory
                 .select(Projections.constructor(GameWithReviewStatDto.class, game, reviewStat))
@@ -286,13 +295,20 @@ public class GameRepositoryImpl implements GameRepositoryCustom {
                         gameExpressions.isReleased()
                 );
 
-        return PageableExecutionUtils.getPage(content, pageable, countQuery::fetchOne);
+        // 페이징 처리된 조회 결과 원본 객체 생성
+        Page<GameWithReviewStatDto> page = PageableExecutionUtils.getPage(content, pageable, countQuery::fetchOne);
+
+        // Redis 역직렬화 호환성을 위해 RestPage 타입으로 래핑 후 반환
+        return new RestPage<>(page);
     }
 
     /**
-     * 최근 리뷰 수가 많이 증가한 특정 태그의 게임 조회
-     * */
+     * 특정 태그가 포함된 게임을 주간 리뷰 수가 많은 순으로 조회
+     * 검색 조건인 tagName을 캐시 키로 지정하여 유저 간 연산 결과 공유 (TTL 12시간)
+     *
+     */
     @Override
+    @Cacheable(value = "main_pick:trending", key = "#tagName + ':' + #pageable.pageNumber")
     public Page<GameWithReviewStatDto> findTrendingGamesByTag(String tagName, int minScore, Pageable pageable) {
 
         List<GameWithReviewStatDto> content = queryFactory
@@ -326,13 +342,19 @@ public class GameRepositoryImpl implements GameRepositoryCustom {
                         gameExpressions.isReleased()
                 );
 
-        return PageableExecutionUtils.getPage(content, pageable, countQuery::fetchOne);
+        // 페이징 처리된 조회 결과 원본 객체 생성
+        Page<GameWithReviewStatDto> page = PageableExecutionUtils.getPage(content, pageable, countQuery::fetchOne);
+
+        // Redis 역직렬화 호환성을 위해 RestPage 타입으로 래핑 후 반환
+        return new RestPage<>(page);
     }
 
     /**
-     * 특정 태그의 플레이타임이 짧은 게임 조회
-     * */
+     * 특정 태그가 포함된 플레이타임이 짧은 게임 조회
+     * 트렌딩 픽과 동일한 생명주기(TTL 12시간)를 가지며, 독립적인 캐시 공간(quick_play)을 할당하여 데이터 충돌 방지
+     */
     @Override
+    @Cacheable(value = "main_pick:quick_play", key = "#tagName + ':' + #pageable.pageNumber")
     public Page<GameWithReviewStatDto> findShortPlaytimeGamesByTag(String tagName, int maxPlaytime, int minScore, Pageable pageable) {
         List<GameWithReviewStatDto> content = queryFactory
                 .select(Projections.constructor(GameWithReviewStatDto.class, game, reviewStat))
@@ -368,7 +390,11 @@ public class GameRepositoryImpl implements GameRepositoryCustom {
                         gameExpressions.isReleased()
                 );
 
-        return PageableExecutionUtils.getPage(content, pageable, countQuery::fetchOne);
+        // 페이징 처리된 조회 결과 원본 객체 생성
+        Page<GameWithReviewStatDto> page = PageableExecutionUtils.getPage(content, pageable, countQuery::fetchOne);
+
+        // Redis 역직렬화 호환성을 위해 RestPage 타입으로 래핑 후 반환
+        return new RestPage<>(page);
     }
 
     /**
