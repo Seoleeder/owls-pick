@@ -19,6 +19,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PagedModel;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -85,7 +86,7 @@ public class MainPickService {
     }
 
     /**
-     * 출시 예정일이 N개월 이내인 출시 예정 기대작 조회
+     * Upcoming Games: 출시 예정일이 N개월 이내인 출시 예정 기대작 조회
      * */
     @Transactional(readOnly = true)
     public UpcomingSectionResponse getUpcomingGames(Pageable pageable) {
@@ -105,7 +106,8 @@ public class MainPickService {
     }
 
     /**
-     * [Section 1] 선호 태그 기반 맞춤 추천 (선호 태그를 가장 많이 포함하는 사용자 맞춤형 최적 게임 리스트 조회)
+     * [Section 1] Most Personalized Picks: 선호 태그 기반 맞춤 추천
+     * 선호 태그를 가장 많이 포함하는 사용자 맞춤형 최적 게임 리스트 조회
      */
     public PersonalizedSectionResponse getMostPersonalizedPicks(Long userId, Pageable pageable) {
         log.debug("[MainPick] Fetching most personalized picks for userId: {}", userId);
@@ -114,7 +116,12 @@ public class MainPickService {
         User user = getUser(userId);
 
         // 사용자의 선호 태그 목록
-        List<String> preferredTags = user.getPreferredTags() != null ? user.getPreferredTags() : Collections.emptyList();
+        List<String> preferredTags = user.getPreferredTags() != null
+                ? new ArrayList<>(user.getPreferredTags())
+                : new ArrayList<>();
+
+        // 동일 태그 조합의 캐시 적중률 극대화를 위한 리스트 오름차순 정렬
+        Collections.sort(preferredTags);
 
         Page<GameWithReviewStatDto> games = gameRepository.findPersonalizedGamesByPreferredTags(preferredTags, pageable);
 
@@ -122,7 +129,7 @@ public class MainPickService {
     }
 
     /**
-     * [Section 2] 단일 장르 랜덤 탐색
+     * [Section 2] Random Genre Picks: 단일 장르 랜덤 탐색
      */
     public PersonalizedSectionResponse getRandomGenrePicks(Pageable pageable) {
         GenreType[] genres = GenreType.values();
@@ -137,7 +144,7 @@ public class MainPickService {
     }
 
     /**
-     * [Section 3] 단일 테마 랜덤 탐색 (성인 태그 EROTIC 필터링)
+     * [Section 3] Random Theme Picks: 단일 테마 랜덤 탐색 (성인 태그 EROTIC 필터링)
      */
     public PersonalizedSectionResponse getRandomThemePicks(Long userId, Pageable pageable) {
 
@@ -159,7 +166,7 @@ public class MainPickService {
     }
 
     /**
-     * [Section 4] 유효한 장르 X 테마 조합을 가진 게임 조회
+     * [Section 4] Intersection Picks: 유효한 장르 X 테마 조합을 가진 게임 조회
      */
     public PersonalizedSectionResponse getIntersectionPicks(Pageable pageable) {
         // 장르 X 테마 조합 데이터가 존재하지 않으면 INDIE 태그로 조회 후 반환
@@ -185,7 +192,7 @@ public class MainPickService {
     }
 
     /**
-     * [Section 5] 스코어는 높은데 리뷰 수는 상대적으로 적은 '숨겨진 명작' 게임 조회
+     * [Section 5] Hidden Masterpieces: 스코어는 높은데 리뷰 수는 상대적으로 적은 '숨겨진 명작' 게임 조회
      */
     public PersonalizedSectionResponse getHiddenMasterpieces(Pageable pageable) {
         log.debug("[MainPick] Fetching hidden masterpieces.");
@@ -216,7 +223,7 @@ public class MainPickService {
     }
 
     /**
-     * [섹션 7] Quick Plays: 플레이타임이 짧고 강렬한 게임 (유저 선호 태그 중 택 1. 리뷰 스코어가 높은 순)
+     * [Section 7] Quick Plays: 플레이타임이 짧고 강렬한 게임 (유저 선호 태그 중 택 1. 리뷰 스코어가 높은 순)
      */
     public PersonalizedSectionResponse getQuickPlays(Long userId, Pageable pageable) {
         User user = getUser(userId);
@@ -230,9 +237,7 @@ public class MainPickService {
         return new PersonalizedSectionResponse(safeTag, responseConverter.convertPage(games));
     }
 
-
     // 헬퍼 메서드
-
     private User getUser(Long userId) {
         return userRepository.findById(userId)
                 .orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND_USER));
