@@ -34,6 +34,7 @@ import java.util.List;
 @Service
 public class ChatService {
 
+    private final ChatTrafficService chatTrafficService;
     private final ChatSessionRepository chatSessionRepository;
     private final ChatMessageRepository chatMessageRepository;
     private final VectorEmbeddingRepository vectorEmbeddingRepository;
@@ -45,6 +46,7 @@ public class ChatService {
     private static final int MAX_TITLE_LENGTH = 30; // 세션 타이틀 최대 길이
 
     public ChatService(
+            ChatTrafficService chatTrafficService,
             ChatSessionRepository chatSessionRepository,
             ChatMessageRepository chatMessageRepository,
             VectorEmbeddingRepository vectorEmbeddingRepository,
@@ -52,6 +54,7 @@ public class ChatService {
             TransactionTemplate transactionTemplate,
             @Qualifier("chatRestClient") RestClient restClient,
             GenaiProperties props) {
+        this.chatTrafficService = chatTrafficService;
         this.chatSessionRepository = chatSessionRepository;
         this.chatMessageRepository = chatMessageRepository;
         this.vectorEmbeddingRepository = vectorEmbeddingRepository;
@@ -71,64 +74,73 @@ public class ChatService {
      */
     public ChatResponse processRagChat(Long userId, ChatRequest request) {
 
-        // 초기 DB 작업 단일 트랜잭션 처리
-        ChatInitData chatInitData = transactionTemplate.execute(status -> {
+        // FastAPI 통신 전 동시성 제어 및 트래픽 제한 검증
+        chatTrafficService.checkTrafficAndAcquireLock(userId);
 
-            // 채팅 세션 및 최근 대화 내역 조회
-            ChatSession session = getOrCreateSession(userId, request);
-            List<ChatHistoryDto> history = getChatHistory(session.getId(), props.chat().historyLimit());
+        try {
 
-            // 사용자 메시지 저장
-            saveChatMessage(session, ChatRole.USER, request.userMessage());
+            // 초기 DB 작업 단일 트랜잭션 처리
+            ChatInitData chatInitData = transactionTemplate.execute(status -> {
 
-            return new ChatInitData(session, history);
-        });
+                // 채팅 세션 및 최근 대화 내역 조회
+                ChatSession session = getOrCreateSession(userId, request);
+                List<ChatHistoryDto> history = getChatHistory(session.getId(), props.chat().historyLimit());
 
-        if (chatInitData == null) throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
+                // 사용자 메시지 저장
+                saveChatMessage(session, ChatRole.USER, request.userMessage());
 
-        ChatSession session = chatInitData.session();
-        List<ChatHistoryDto> history = chatInitData.history();
+                return new ChatInitData(session, history);
+            });
 
-        // 메시지 벡터 임베딩 추출 (사용자 메시지 + 최근 대화 내역)
-        float[] queryVector = fetchQueryEmbedding(history, request.userMessage());
+            if (chatInitData == null) throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
 
-        // 벡터 유사도 기반 상위 연관 게임 검색
-        List<VectorEmbedding> similarGames = vectorEmbeddingRepository.findTopSimilarGames(queryVector, 5);
+            ChatSession session = chatInitData.session();
+            List<ChatHistoryDto> history = chatInitData.history();
 
-        // 연관 게임 조회 실패 시 예외 처리
-        if (similarGames.isEmpty()) {
-            throw new CustomException(ErrorCode.NOT_FOUND_GAME);
-        }
+            // 메시지 벡터 임베딩 추출 (사용자 메시지 + 최근 대화 내역)
+            float[] queryVector = fetchQueryEmbedding(history, request.userMessage());
 
+            // 벡터 유사도 기반 상위 연관 게임 검색
+            List<VectorEmbedding> similarGames = vectorEmbeddingRepository.findTopSimilarGames(queryVector, 5);
 
-        // Vector DB 검색 결과 상세 추적 (데이터 유실 구간 파악)
-        if (log.isDebugEnabled()) {
-            log.debug("Retrieved {} similar games from Vector DB.", similarGames.size());
-            for (int i = 0; i < similarGames.size(); i++) {
-                VectorEmbedding game = similarGames.get(i);
-                String textPreview = game.getSourceText().length() > 50
-                        ? game.getSourceText().substring(0, 50) + "..."
-                        : game.getSourceText();
-
-                log.debug("Rank {}: Game ID = {}, Source Text Preview = {}", (i + 1), game.getGameId(), textPreview);
+            // 연관 게임 조회 실패 시 예외 처리
+            if (similarGames.isEmpty()) {
+                throw new CustomException(ErrorCode.NOT_FOUND_GAME);
             }
+
+
+            // Vector DB 검색 결과 상세 추적 (데이터 유실 구간 파악)
+            if (log.isDebugEnabled()) {
+                log.debug("Retrieved {} similar games from Vector DB.", similarGames.size());
+                for (int i = 0; i < similarGames.size(); i++) {
+                    VectorEmbedding game = similarGames.get(i);
+                    String textPreview = game.getSourceText().length() > 50
+                            ? game.getSourceText().substring(0, 50) + "..."
+                            : game.getSourceText();
+
+                    log.debug("Rank {}: Game ID = {}, Source Text Preview = {}", (i + 1), game.getGameId(), textPreview);
+                }
+            }
+
+            // 연관 게임의 원본 메타데이터 추출
+            List<String> contexts = similarGames.stream()
+                    .map(VectorEmbedding::getSourceText)
+                    .toList();
+
+            // RAG 기반 최종 응답 생성
+            String reply = fetchGeneratedChat(history, request.userMessage(), contexts);
+
+            // 응답 메시지 저장 (내부 트랜잭션 적용)
+            transactionTemplate.executeWithoutResult(status ->
+                    saveChatMessage(session, ChatRole.ASSISTANT, reply)
+            );
+
+            // 최종 응답 반환
+            return new ChatResponse(session.getId(), reply);
+        } finally {
+            // 로직 수행 완료 및 예외 발생 여부와 무관하게 점유한 분산 락 반환
+            chatTrafficService.releaseLock(userId);
         }
-
-        // 연관 게임의 원본 메타데이터 추출
-        List<String> contexts = similarGames.stream()
-                .map(VectorEmbedding::getSourceText)
-                .toList();
-
-        // RAG 기반 최종 응답 생성
-        String reply = fetchGeneratedChat(history, request.userMessage(), contexts);
-
-        // 응답 메시지 저장 (내부 트랜잭션 적용)
-        transactionTemplate.executeWithoutResult(status ->
-                saveChatMessage(session, ChatRole.ASSISTANT, reply)
-        );
-
-        // 최종 응답 반환
-        return new ChatResponse(session.getId(), reply);
     }
 
     /**

@@ -50,6 +50,10 @@ public enum ErrorCode {
     ALREADY_ONBOARDED(40901, HttpStatus.CONFLICT, "이미 온보딩이 완료되었습니다."),
     DUPLICATE_NICKNAME(40902, HttpStatus.CONFLICT, "이미 사용 중인 닉네임입니다."),
 
+    // 429 Too Many Requests
+    TOO_MANY_REQUESTS(42900, HttpStatus.TOO_MANY_REQUESTS, "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."),
+    CHATBOT_PROCESSING(42901, HttpStatus.TOO_MANY_REQUESTS, "답변을 생성 중입니다. 잠시만 기다려주세요."),
+
     // 500 Internal Server Error
     INTERNAL_SERVER_ERROR(50000, HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류입니다."),
     OAUTH_SERVER_ERROR(50001, HttpStatus.INTERNAL_SERVER_ERROR, "소셜 로그인 서버와 통신 중 오류가 발생했습니다."),

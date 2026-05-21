@@ -37,6 +37,22 @@ public record GenaiProperties(
 
     // RAG 기반 Owls 챗봇 관련 설정
     public record Chat(
-            int historyLimit
-    ){}
+            int historyLimit,
+            Traffic traffic
+    ){
+        // 챗봇 트래픽 제어 인프라 설정
+        public record Traffic(
+                Prefix prefix,
+                Limit limit
+        ) {
+            public record Prefix(
+                    String lock,
+                    String rateLimit
+            ) {}
+
+            public record Limit(
+                    int maxRequestsPerMinute
+            ) {}
+        }
+    }
 }
