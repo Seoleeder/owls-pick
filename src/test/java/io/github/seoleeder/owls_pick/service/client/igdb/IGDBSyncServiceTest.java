@@ -36,7 +36,7 @@ import static org.mockito.Mockito.*;
 class IGDBSyncServiceTest {
 
     @InjectMocks
-    private IGDBSyncService igdbSyncService;
+    private IgdbSyncService igdbSyncService;
 
     @Mock private IgdbDataCollector collector;
     @Mock private GameRepository gameRepository;

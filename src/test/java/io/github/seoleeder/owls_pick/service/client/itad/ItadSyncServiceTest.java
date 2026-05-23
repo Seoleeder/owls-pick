@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.core.task.SyncTaskExecutor;
 import org.springframework.core.task.support.TaskExecutorAdapter;
 import org.springframework.transaction.TransactionStatus;
@@ -46,6 +47,7 @@ class ItadSyncServiceTest {
     @Mock private GameRepository gameRepository;
     @Mock private StoreDetailRepository storeDetailRepository;
     @Mock private TransactionTemplate transactionTemplate;
+    @Mock private ApplicationEventPublisher eventPublisher;
 
     @BeforeEach
     void setUp() {
@@ -57,7 +59,8 @@ class ItadSyncServiceTest {
                 gameRepository,
                 storeDetailRepository,
                 new TaskExecutorAdapter(new SyncTaskExecutor()),
-                transactionTemplate, ,
+                transactionTemplate,
+                eventPublisher,
                 props);
     }
 
