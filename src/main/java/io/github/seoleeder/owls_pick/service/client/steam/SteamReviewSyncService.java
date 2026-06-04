@@ -120,6 +120,41 @@ public class SteamReviewSyncService {
     }
 
     /**
+     * 대상 게임 리스트의 리뷰 수집 및 영속화 작업을 비동기 병렬 처리하는 공통 메서드.
+     */
+    private void processBatchAsync(List<StoreDetail> targetGames) {
+        AtomicInteger completedCount = new AtomicInteger(0);
+        AtomicInteger totalSavedReviews = new AtomicInteger(0);
+        int totalTarget = targetGames.size();
+
+        // futures : 비동기 작업의 결과물(작업 완료 상태)들을 모아둘 리스트
+        // runAsync : 각각의 스팀 ID에 대해서 비동기 작업 수행
+        // taskExecutor: 부모 스레드의 MDC(Trace ID) 상태를 캡처하여 신규 스레드로 전파
+        List<CompletableFuture<Void>> futures = targetGames.stream()
+                .map(detail -> CompletableFuture.runAsync(() -> {
+                    // 리뷰 수집 및 저장 후, 새로 저장된 리뷰 개수 반환
+                    int savedCount = processGameReviewSyncSafe(detail);
+
+                    // 스레드 안전하게 카운트 증가
+                    int currentCompleted = completedCount.incrementAndGet();
+                    totalSavedReviews.addAndGet(savedCount);
+
+                    // 실시간 진행 상황 로깅
+                    log.debug("[Steam Review] Game {}/{} processed. (New reviews saved: {})",
+                            currentCompleted, totalTarget, savedCount);
+                }, taskExecutor))
+                .toList();
+
+        // 여러 메모리에 흩어져 있는 각각의 비동기 작업의 상태를 하나로 묶어서 통합 관리
+        // toArray(new CompletableFuture[0]) 리스트를 배열로 바꿔서 allOf에 전달
+        // allOf() : 모든 작업이 완료 상태가 될때까지 관리하는 통합 Future를 생성
+        // join() : 해당 배치 작업이 전부 완료될 때까지 대기 (Blocking), 예외 발생시 RuntimeException 던짐.
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+        log.info("Batch Process Completed. Total new reviews saved across all threads: {}", totalSavedReviews.get());
+    }
+
+    /**
      * 특정 게임에 대한 리뷰 수집 -> 내부의 독립적인 트랜잭션에서 저장
      * @param detail 리뷰 작업을 수행할 스팀 ID를 담은 스토어 상세 정보 객체
      * */
@@ -262,40 +297,5 @@ public class SteamReviewSyncService {
         }
 
         return reviewsToSave.size();
-    }
-
-    /**
-     * 공통 병렬 처리 로직
-     */
-    private void processBatchAsync(List<StoreDetail> targetGames) {
-        AtomicInteger completedCount = new AtomicInteger(0);
-        AtomicInteger totalSavedReviews = new AtomicInteger(0);
-        int totalTarget = targetGames.size();
-
-        // futures : 비동기 작업의 결과물(작업 완료 상태)들을 모아둘 리스트
-        // runAsync : 각각의 스팀 ID에 대해서 비동기 작업 수행
-        // taskExecutor: 부모 스레드의 MDC(Trace ID) 상태를 캡처하여 신규 스레드로 전파
-        List<CompletableFuture<Void>> futures = targetGames.stream()
-                .map(detail -> CompletableFuture.runAsync(() -> {
-                    // 리뷰 수집 및 저장 후, 새로 저장된 리뷰 개수 반환
-                    int savedCount = processGameReviewSyncSafe(detail);
-
-                    // 스레드 안전하게 카운트 증가
-                    int currentCompleted = completedCount.incrementAndGet();
-                    totalSavedReviews.addAndGet(savedCount);
-
-                    // 실시간 진행 상황 로깅
-                    log.debug("[Steam Review] Game {}/{} processed. (New reviews saved: {})",
-                            currentCompleted, totalTarget, savedCount);
-                }, taskExecutor))
-                .toList();
-
-        // 여러 메모리에 흩어져 있는 각각의 비동기 작업의 상태를 하나로 묶어서 통합 관리
-        // toArray(new CompletableFuture[0]) 리스트를 배열로 바꿔서 allOf에 전달
-        // allOf() : 모든 작업이 완료 상태가 될때까지 관리하는 통합 Future를 생성
-        // join() : 해당 배치 작업이 전부 완료될 때까지 대기 (Blocking), 예외 발생시 RuntimeException 던짐.
-        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-
-        log.info("Batch Process Completed. Total new reviews saved across all threads: {}", totalSavedReviews.get());
     }
 }

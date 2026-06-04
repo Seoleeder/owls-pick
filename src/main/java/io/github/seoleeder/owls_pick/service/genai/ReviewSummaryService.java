@@ -35,7 +35,6 @@ public class ReviewSummaryService {
     private final AsyncTaskExecutor taskExecutor; // Trace ID 전파 및 가상 스레드 처리를 지원하는 스프링 메인 실행기
     private final GenaiProperties props;
 
-
     // 총 리뷰 수가 임계치 넘지만 실제 리뷰는 없는 게임 스킵 마킹 상수
     public static final String INSUFFICIENT_DATA_FLAG = "INSUFFICIENT_REVIEW_DATA";
 
@@ -54,7 +53,6 @@ public class ReviewSummaryService {
         this.restClient = restClient;
         this.taskExecutor = taskExecutor;
         this.props = props;
-
     }
 
     /**

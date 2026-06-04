@@ -1,7 +1,8 @@
-package io.github.seoleeder.owls_pick.global.event;
+package io.github.seoleeder.owls_pick.service.notification.listener;
 
 import io.github.seoleeder.owls_pick.repository.WishlistRepository;
-import io.github.seoleeder.owls_pick.service.NotificationService;
+import io.github.seoleeder.owls_pick.service.notification.NotificationService;
+import io.github.seoleeder.owls_pick.service.client.itad.event.GameDiscountEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;

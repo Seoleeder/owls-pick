@@ -6,10 +6,7 @@ import io.github.seoleeder.owls_pick.support.AbstractContainerBaseTest;
 import jakarta.persistence.EntityManagerFactory;
 import org.hibernate.SessionFactory;
 import org.hibernate.stat.Statistics;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -31,6 +28,7 @@ import static org.mockito.BDDMockito.given;
 /**
  * MainPick 서비스 Redis 캐싱 최적화 통합 테스트
  */
+@Tag("integration")
 @SpringBootTest
 @EnableCaching
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -65,7 +63,7 @@ class MainPickCacheIntegrationTest extends AbstractContainerBaseTest {
         SessionFactory sessionFactory = entityManagerFactory.unwrap(SessionFactory.class);
         hibernateStatistics = sessionFactory.getStatistics();
         hibernateStatistics.setStatisticsEnabled(true);
-        hibernateStatistics.clear(); // 카운트를 0으로 초기화!
+        hibernateStatistics.clear(); // 카운트를 0으로 초기화
 
         // 내부 랜덤 로직 통제를 위한 단일 선호 태그 유저 정보 주입
         User dummyUser = User.builder()

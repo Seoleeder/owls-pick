@@ -4,7 +4,7 @@ import io.github.seoleeder.owls_pick.dto.request.FcmTokenRequest;
 import io.github.seoleeder.owls_pick.dto.response.DiscountNotificationResponse;
 import io.github.seoleeder.owls_pick.global.response.CommonResponse;
 import io.github.seoleeder.owls_pick.global.security.CustomUserDetails;
-import io.github.seoleeder.owls_pick.service.NotificationService;
+import io.github.seoleeder.owls_pick.service.notification.NotificationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;

@@ -26,7 +26,8 @@ public abstract class AbstractContainerBaseTest {
     )
             .withDatabaseName("owlspick_test")
             .withUsername("test")
-            .withPassword("test");
+            .withPassword("test")
+            .withInitScript("init.sql");
 
     // Redis 컨테이너 (7-alpine)
     static final GenericContainer<?> REDIS_CONTAINER = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))

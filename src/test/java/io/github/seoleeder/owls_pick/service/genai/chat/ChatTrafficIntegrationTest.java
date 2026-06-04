@@ -4,10 +4,7 @@ import io.github.seoleeder.owls_pick.global.config.properties.GenaiProperties;
 import io.github.seoleeder.owls_pick.global.response.CustomException;
 import io.github.seoleeder.owls_pick.global.response.ErrorCode;
 import io.github.seoleeder.owls_pick.support.AbstractContainerBaseTest;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -24,6 +21,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /**
  * Owls 챗봇 트래픽 제어 인프라 통합 테스트
  */
+@Tag("integration")
 @SpringBootTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 class ChatTrafficIntegrationTest extends AbstractContainerBaseTest {
@@ -63,7 +61,7 @@ class ChatTrafficIntegrationTest extends AbstractContainerBaseTest {
     @Test
     @DisplayName("분산 락 검증 : 동일 유저의 동시 다발적 중복 요청 시 1건만 성공하고 나머지는 차단됨")
     void concurrentAccessDistributedLockTest() throws InterruptedException {
-        // [Given] 멀티스레드 동시 인입 환경 설정 (10개 스레드 할당)
+        // [Given] 멀티스레드 동시 요청 유입 환경 설정 (10개 스레드 할당)
         int threadCount = 10;
         ExecutorService executorService = Executors.newFixedThreadPool(threadCount);
 
@@ -111,7 +109,7 @@ class ChatTrafficIntegrationTest extends AbstractContainerBaseTest {
             chatTrafficService.releaseLock(TEST_USER_ID); // 다음 호출을 위해 분산 락 반환
         }
 
-        // [When & Then] 임계치를 초과하는 최종 +1회차 요청 시 트래픽 제한 예외 발생 확인
+        // [When & Then] 임계치를 초과하는 최종 +1회차 요청 유입 시 트래픽 제한 예외 발생 확인
         assertThatThrownBy(() -> chatTrafficService.checkTrafficAndAcquireLock(TEST_USER_ID))
                 .isInstanceOf(CustomException.class)
                 .extracting("errorCode")

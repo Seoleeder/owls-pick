@@ -1,0 +1,3 @@
+-- PostgreSQL 확장 모듈 활성화
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS vector;

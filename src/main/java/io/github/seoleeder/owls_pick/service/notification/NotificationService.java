@@ -1,4 +1,4 @@
-package io.github.seoleeder.owls_pick.service;
+package io.github.seoleeder.owls_pick.service.notification;
 
 import com.google.firebase.messaging.*;
 import io.github.seoleeder.owls_pick.dto.response.DiscountNotificationResponse;

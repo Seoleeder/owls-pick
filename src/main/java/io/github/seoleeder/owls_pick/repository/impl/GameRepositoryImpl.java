@@ -445,7 +445,6 @@ public class GameRepositoryImpl implements GameRepositoryCustom {
                         gameExpressions.isDiscounting(condition.isDiscounting()),   // 할인 중인 게임 필터링
                         gameExpressions.isReleased() // 출시 완료된 게임만 노출
                 )
-                .distinct() // 조인으로 인한 중복 데이터 제거
                 .orderBy(gameExpressions.getOrderSpecifiers(condition.sort(), condition.keyword()))
                 .offset(pageable.getOffset())
                 .limit(pageable.getPageSize())
@@ -453,7 +452,7 @@ public class GameRepositoryImpl implements GameRepositoryCustom {
 
         // 카운트 쿼리 (페이징 최적화를 위해 별도 실행)
         JPAQuery<Long> countQuery = queryFactory
-                .select(game.countDistinct())
+                .select(game.count())
                 .from(game)
                 .join(tag).on(tag.game.id.eq(game.id))
                 .leftJoin(storeDetail).on(storeDetail.game.id.eq(game.id))

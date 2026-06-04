@@ -39,7 +39,6 @@ public class DashboardRepositoryImpl implements DashboardRepositoryCustom {
                         )
                 )
                 .orderBy(dashboard.rank.asc())
-                .distinct()
                 .fetch();
     }
 
@@ -66,7 +65,6 @@ public class DashboardRepositoryImpl implements DashboardRepositoryCustom {
                 )
                 .orderBy(dashboard.rank.asc())
                 .limit(limit)
-                .distinct()
                 .fetch();
     }
 

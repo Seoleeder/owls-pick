@@ -158,15 +158,34 @@ public class GameExpressions {
                 .or(Expressions.booleanTemplate("function('array_overlap', {0}, {1}) = true", tag.themes, tags));
     }
 
+//    /**
+//     * 태그 교집합 점수 계산 (장르 교집합 + 테마 교집합 개수)
+//     *
+//     */
+//    public NumberExpression<Integer> calculateTagMatchScore(String[] tags) {
+//        return Expressions.numberTemplate(Integer.class,
+//                "cardinality(array(select unnest({0}) intersect select unnest({1}))) + " +
+//                        "cardinality(array(select unnest({2}) intersect select unnest({1})))",
+//                tag.genres, tags, tag.themes);
+//    }
+
     /**
-     * 태그 교집합 점수 계산 (장르 교집합 + 테마 교집합 개수)
-     *
+     * 태그 교집합 점수 계산 (장르 교집합 개수 + 테마 교집합 개수)
      */
     public NumberExpression<Integer> calculateTagMatchScore(String[] tags) {
-        return Expressions.numberTemplate(Integer.class,
-                "cardinality(array(select unnest({0}) intersect select unnest({1}))) + " +
-                        "cardinality(array(select unnest({2}) intersect select unnest({1})))",
-                tag.genres, tags, tag.themes);
+
+        // // 장르(genres) 교집합 개수 산출
+        NumberExpression<Integer> genreMatchCount = Expressions.numberTemplate(Integer.class,
+                "cast(function('array_intersect_count', {0}, {1}) as int)",
+                tag.genres, tags);
+
+        // 테마(themes) 교집합 개수 산출
+        NumberExpression<Integer> themeMatchCount = Expressions.numberTemplate(Integer.class,
+                "cast(function('array_intersect_count', {0}, {1}) as int)",
+                tag.themes, tags);
+
+        // 산출된 가중치 총합 반환
+        return genreMatchCount.add(themeMatchCount);
     }
 
     // --- 동적 정렬 (Sorting) ---
