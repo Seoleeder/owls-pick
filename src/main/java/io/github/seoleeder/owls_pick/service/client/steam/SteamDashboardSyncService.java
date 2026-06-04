@@ -306,9 +306,6 @@ public class SteamDashboardSyncService {
                 }
 
                 log.debug("Saved {} dashboards for type [{}]. (Missing games: {})", dashboards.size(), type, missingGames);
-
-                //Redis 캐시 갱신
-                dashboardService.refreshCache(type);
             });
         } catch (DataAccessException e) {
             // 트랜잭션 롤백 후 여기서 잡힘

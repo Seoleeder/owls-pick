@@ -1,66 +1,86 @@
 package io.github.seoleeder.owls_pick.config;
 
 import io.github.seoleeder.owls_pick.global.config.AdminAuthorizationInterceptor;
-import io.github.seoleeder.owls_pick.global.config.WebConfig;
 import io.github.seoleeder.owls_pick.global.config.properties.AdminProperties;
+import io.github.seoleeder.owls_pick.global.response.CustomException;
 import io.github.seoleeder.owls_pick.global.response.ErrorCode;
-import io.github.seoleeder.owls_pick.global.response.GlobalExceptionHandler;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.context.annotation.Import;
-import org.springframework.test.context.TestPropertySource;
-import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
 
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.print;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
+import static org.mockito.BDDMockito.given;
 
-//테스트용 더미 컨트롤러
-@RestController
-class DummyController {
-    @GetMapping("/admin/test")
-    public String test() { return "ok"; }
-}
-
-@WebMvcTest(DummyController.class) // 더미 컨트롤러만 띄움
-@AutoConfigureMockMvc(addFilters = false) //security Filter 무력화
-@Import({WebConfig.class, AdminAuthorizationInterceptor.class, GlobalExceptionHandler.class})
-@EnableConfigurationProperties(AdminProperties.class)   // 인터셉터 관련 설정 로드
-@TestPropertySource(properties = "owls-pick.admin-key=valid-key")
+/**
+ * 어드민 전용 API 접근 비밀키 헤더 검증 인터셉터 순수 로직 테스트
+ */
+@ExtendWith(MockitoExtension.class)
 class AdminAuthorizationInterceptorTest {
 
-    @Autowired
-    private MockMvc mockMvc;
+    @InjectMocks
+    private AdminAuthorizationInterceptor interceptor;
+
+    @Mock
+    private AdminProperties adminProperties;
+
+    private MockHttpServletRequest request;
+    private MockHttpServletResponse response;
+    private Object handler;
+
+    @BeforeEach
+    void setUp() {
+        // [Given] 테스트용 HTTP 요청/응답 객체 초기화
+        request = new MockHttpServletRequest();
+        response = new MockHttpServletResponse();
+        handler = new Object();
+    }
 
     @Test
-    @DisplayName("[성공] 올바른 키를 보내면 인터셉터 통과")
+    @DisplayName("올바른 어드민 키 헤더 통과 검증")
     void preHandle_Success() throws Exception {
-        mockMvc.perform(get("/admin/test")
-                        .header("X-ADMIN-KEY", "valid-key"))
-                .andExpect(status().isOk());
+        // [Given] 유효한 어드민 키 모킹 및 요청 헤더 설정
+        given(adminProperties.adminKey()).willReturn("valid-key");
+        request.addHeader("X-ADMIN-KEY", "valid-key");
+
+        // [When] 인터셉터 로직 직접 호출
+        boolean result = interceptor.preHandle(request, response, handler);
+
+        // [Then] 요청이 차단되지 않고 통과(true 반환)됨을 확인
+        assertThat(result).isTrue();
     }
 
     @Test
-    @DisplayName("[실패] 잘못된 키를 보내면 ADMIN_KEY_ERROR 예외 발생")
+    @DisplayName("잘못된 어드민 키 헤더 차단 검증")
     void preHandle_Fail_WrongKey() throws Exception {
-        mockMvc.perform(get("/admin/test")
-                        .header("X-ADMIN-KEY", "wrong-key"))
-                .andDo(print())
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.error.code").value(ErrorCode.ADMIN_KEY_ERROR.getCode()));
+        // [Given] 유효한 어드민 키 모킹 및 잘못된 요청 헤더 설정
+        given(adminProperties.adminKey()).willReturn("valid-key");
+        request.addHeader("X-ADMIN-KEY", "wrong-key");
+
+        // [When & Then] 인터셉터 호출 시 ADMIN_KEY_ERROR 예외 발생 확인
+        assertThatThrownBy(() -> interceptor.preHandle(request, response, handler))
+                .isInstanceOf(CustomException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.ADMIN_KEY_ERROR);
     }
 
     @Test
-    @DisplayName("[실패] 헤더가 없으면 예외 발생")
+    @DisplayName("인증 헤더 누락 차단 검증")
     void preHandle_Fail_NoHeader() throws Exception {
-        mockMvc.perform(get("/admin/test"))
-                .andExpect(status().isUnauthorized());
+
+        // [Given] 유효한 어드민 키 모킹 및 헤더 없는 요청 객체 준비
+        given(adminProperties.adminKey()).willReturn("valid-key");
+
+        // [When & Then] 헤더 누락 시 ADMIN_KEY_ERROR 예외 발생 확인
+        assertThatThrownBy(() -> interceptor.preHandle(request, response, handler))
+                .isInstanceOf(CustomException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.ADMIN_KEY_ERROR);
     }
 }

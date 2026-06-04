@@ -1,4 +1,4 @@
-package io.github.seoleeder.owls_pick.global.event;
+package io.github.seoleeder.owls_pick.service.client.itad.event;
 
 import java.time.LocalDateTime;
 

@@ -8,7 +8,7 @@ import io.github.seoleeder.owls_pick.global.config.properties.ItadProperties;
 import io.github.seoleeder.owls_pick.entity.game.Game;
 import io.github.seoleeder.owls_pick.entity.game.StoreDetail;
 import io.github.seoleeder.owls_pick.entity.game.StoreDetail.StoreName;
-import io.github.seoleeder.owls_pick.global.event.GameDiscountEvent;
+import io.github.seoleeder.owls_pick.service.client.itad.event.GameDiscountEvent;
 import io.github.seoleeder.owls_pick.repository.GameRepository;
 import io.github.seoleeder.owls_pick.repository.StoreDetailRepository;
 import lombok.extern.slf4j.Slf4j;

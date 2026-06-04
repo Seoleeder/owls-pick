@@ -44,3 +44,6 @@ src/main/resources/firebase/*.json
 **/application-*.yaml
 .env
 .env.*
+
+# JVM Heap Dumps
+*.hprof
