@@ -1,0 +1,53 @@
+# 인증 비활성화
+auth_enabled: false
+
+# 로키 서버 수신 HTTP 포트
+server:
+  http_listen_port: 3100
+
+common:
+  # API 경로 접두사
+  path_prefix: /loki
+  storage:
+    filesystem:
+      # 청크 데이터 및 룰 파일 저장 경로
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  # 데이터 복제 계수 (단일 노드)
+  replication_factor: 1
+  ring:
+    # 인스턴스 바인딩 주소
+    instance_addr: 127.0.0.1
+    kvstore:
+      # 키-값 저장소 타입
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      # 인덱스 스토어 엔진
+      store: tsdb
+      # 객체 스토어 타입
+      object_store: filesystem
+      # 스키마 버전
+      schema: v13
+      index:
+        # 인덱스 파일 접두사 및 생성 주기
+        prefix: index_
+        period: 24h
+
+compactor:
+  # 컴팩터 작업 디렉토리
+  working_directory: /loki/compactor
+  # 공유 스토어 타입
+  shared_store: filesystem
+  # 보관 주기 관리 활성화
+  retention_enabled: true
+  # 압축 작업 실행 주기
+  compaction_interval: 10m
+
+limits_config:
+  # 전역 데이터 보관 기한 (15일)
+  retention_period: 15d
+  # 최대 과거 쿼리 허용 범위 (15일)
+  max_query_lookback: 15d

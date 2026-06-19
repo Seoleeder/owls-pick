@@ -7,6 +7,11 @@ services:
       - .env
     environment:
       - SPRING_PROFILES_ACTIVE=dev # 로컬 테스트용 프로필
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
 
   owls-pick-fastapi:
     build: C:/owls-ai-engine
@@ -14,49 +19,51 @@ services:
       - "8000:8000"
 
   postgres:
+    image: pgvector/pgvector:pg17
+    container_name: owls-pick-postgres
     ports:
       - "5432:5432" # 로컬에서 DBeaver, DataGrip 등 DB 툴 접속을 위해 개방
+    environment:
+      POSTGRES_DB: owls_pick
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: Asia/Seoul # KST 타임존 강제
+    volumes:
+      # 컨테이너를 삭제해도 데이터가 날아가지 않도록 볼륨 매핑
+      - owls-pick-db-data:/var/lib/postgresql/data
+    networks:
+      - owls-pick-network # 전용 네트워크 지정
+    restart: unless-stopped # 에러로 죽었을 때만 재시작 (항상 재시작 방지)
+    healthcheck:
+      # DB가 쿼리를 받을 준비가 되었는지 핑을 보내서 확인하는 명령어
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d owls_pick" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     ports:
       - "6379:6379" # 로컬에서 Redis GUI 툴 접속을 위해 개방
 
   prometheus:
-    image: prom/prometheus:latest
-    container_name: owls-pick-prometheus
     ports:
       - "9090:9090"
     volumes:
       # 로컬에 생성한 설정 파일을 컨테이너 내부로 마운트
       # [내 PC의 실제 경로] : [도커 컨테이너 내부의 약속된 경로]
       - ./prometheus/prometheus.yaml:/etc/prometheus/prometheus.yml
-    networks:
-      - owls-pick-network
 
   grafana:
-    image: grafana/grafana:latest
-    container_name: owls-pick-grafana
     ports:
       - "4000:3000"
     environment:
       # 그라파나 초기 접속 아이디와 비밀번호
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-    depends_on:
-      - prometheus
-    networks:
-      - owls-pick-network
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
 
   loki:
-    image: grafana/loki:2.9.8
-    container_name: owls-pick-loki
     ports:
       - "3100:3100"
-    command: -config.file=/etc/loki/local-config.yaml
-    volumes:
-      - loki-data:/loki
-    networks:
-      - owls-pick-network
 
 volumes:
-  loki-data:
+  owls-pick-db-data:

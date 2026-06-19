@@ -1,47 +1,25 @@
-version: '3.8'
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m" # 로그 파일 하나당 최대 10MB
+    max-file: "3"   # 최대 3개까지만 보관
 
 services:
-  # [추가됨] Spring Boot 백엔드 서비스
   owls-pick-api:
     image: seoleeder/owls-pick-spring-api:latest
     container_name: owls-pick-api
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_started
     networks:
       - owls-pick-network
     restart: unless-stopped
+    logging: *default-logging
 
-  # FastAPI 서비스
   owls-pick-fastapi:
     image: seoleeder/owls-pick-fastapi:latest
     container_name: owls-pick-fastapi
     networks:
       - owls-pick-network
     restart: unless-stopped
-
-  postgres:
-    image: pgvector/pgvector:pg17
-    container_name: owls-pick-postgres
-    environment:
-      POSTGRES_DB: owls_pick
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      TZ: Asia/Seoul # KST 타임존 강제
-    volumes:
-      # 컨테이너를 삭제해도 데이터가 날아가지 않도록 볼륨 매핑
-      - owls-pick-db-data:/var/lib/postgresql/data
-    networks:
-      - owls-pick-network # 전용 네트워크 지정
-    restart: unless-stopped # 에러로 죽었을 때만 재시작 (항상 재시작 방지)
-    healthcheck:
-      # DB가 쿼리를 받을 준비가 되었는지 핑을 때려 확인하는 명령어
-      test: [ "CMD-SHELL", "pg_isready -U postgres -d owls_pick" ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+    logging: *default-logging
 
   redis:
     image: redis:bookworm
@@ -54,11 +32,40 @@ services:
     networks:
       - owls-pick-network # 전용 네트워크 지정
     restart: unless-stopped
+    logging: *default-logging
 
-volumes:
-  owls-pick-db-data:
-  owls-pick-redis-data:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: owls-pick-prometheus
+    networks:
+      - owls-pick-network
+    restart: unless-stopped
+    logging: *default-logging
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: owls-pick-grafana
+    environment:
+      - TZ=Asia/Seoul
+    depends_on:
+      - prometheus
+    networks:
+      - owls-pick-network
+    restart: unless-stopped
+    logging: *default-logging
+
+  loki:
+    image: grafana/loki:2.9.8
+    container_name: owls-pick-loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - owls-pick-network
+    restart: unless-stopped
+    logging: *default-logging
 
 networks:
   owls-pick-network:
     driver: bridge
+
+volumes:
+  owls-pick-redis-data:

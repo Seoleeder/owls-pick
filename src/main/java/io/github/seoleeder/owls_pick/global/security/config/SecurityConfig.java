@@ -4,6 +4,7 @@ import io.github.seoleeder.owls_pick.global.security.config.properties.CorsPrope
 import io.github.seoleeder.owls_pick.global.security.jwt.JwtAuthenticationEntryPoint;
 import io.github.seoleeder.owls_pick.global.security.jwt.JwtAuthenticationFilter;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -69,12 +70,11 @@ public class SecurityConfig {
                                 // swagger 관련
                                 "/swagger-ui.html",
                                 "/swagger-ui/**",
-                                "/v3/api-docs/**",
-
-                                // prometheus actuator
-                                "/actuator/prometheus",
-                                "/actuator/health"
+                                "/v3/api-docs/**"
                         ).permitAll()
+
+                        // Actuator 엔드포인트 전용 접근 허용
+                        .requestMatchers(EndpointRequest.toAnyEndpoint()).permitAll()
 
                         // 그 외 모든 요청은 토큰 인증 필요
                         .anyRequest().authenticated()
