@@ -26,6 +26,13 @@ repositories {
 
 ext {
 	set('resilience4jVersion', "2.4.0")
+	set('springCloudAwsVersion', "3.1.1")
+}
+
+dependencyManagement {
+	imports {
+		mavenBom "io.awspring.cloud:spring-cloud-aws-dependencies:${springCloudAwsVersion}"
+	}
 }
 
 dependencies {
@@ -67,6 +74,9 @@ dependencies {
 
 	// pgvector
 	implementation 'org.hibernate.orm:hibernate-vector:6.6.48.Final'
+
+	// Spring Cloud AWS
+	implementation 'io.awspring.cloud:spring-cloud-aws-starter-parameter-store'
 
 	annotationProcessor "org.springframework.boot:spring-boot-configuration-processor"
 	compileOnly 'org.projectlombok:lombok'

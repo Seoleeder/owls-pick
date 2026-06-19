@@ -10,8 +10,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ClassPathResource;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Base64;
 
 
 /**
@@ -29,9 +31,9 @@ public class FirebaseConfig {
     @PostConstruct
     public void init() {
         try {
-            // 리소스(resources/firebase/...) 경로 식별
-            ClassPathResource resource = new ClassPathResource(firebaseProperties.path());
-            InputStream serviceAccount = resource.getInputStream();
+            // 환경 변수로 주입받은 Base64 문자열을 디코딩하여 메모리 스트림으로 생성
+            byte[] decodedBytes = Base64.getDecoder().decode(firebaseProperties.credentialsBase64());
+            InputStream serviceAccount = new ByteArrayInputStream(decodedBytes);
 
             // 파일 데이터를 구글 서비스 인증에 사용할 수 있는 형태로 변환하고 설정 구성
             FirebaseOptions options = FirebaseOptions.builder()
