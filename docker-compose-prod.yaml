@@ -52,6 +52,8 @@ services:
     depends_on:
       - owls-pick-api
       - grafana
+    networks:
+      - owls-pick-network
 
 volumes:
   prometheus-data:
