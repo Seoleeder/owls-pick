@@ -16,7 +16,7 @@ services:
     ports:
       - "127.0.0.1:9090:9090"
     volumes:
-      - ./prometheus/prometheus-prod.yaml:/etc/prometheus/prometheus.yml
+      - ./prometheus/prometheus.yaml:/etc/prometheus/prometheus.yml
       # 컨테이너 재시작 시에도 수집된 메트릭 데이터를 보존하기 위한 볼륨 매핑
       - prometheus-data:/prometheus
 
@@ -35,7 +35,7 @@ services:
     ports:
       - "127.0.0.1:3100:3100"
     volumes:
-      - ./loki/loki-config.yaml:/etc/loki/local-config.yaml
+      - ./loki/local-config.yaml:/etc/loki/local-config.yaml
       - loki-data:/loki
 
   nginx:
