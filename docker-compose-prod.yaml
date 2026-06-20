@@ -42,6 +42,7 @@ services:
     image: nginx:alpine
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       # 리버스 프록시 및 포워딩 규칙이 담긴 Nginx 메인 설정 파일 연결
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
