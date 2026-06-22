@@ -111,3 +111,7 @@ tasks.named('test') {
 	// 테스트 실행 시 JVM 동적 에이전트 로딩(Dynamic Agent Loading) 허용 옵션 적용
 	jvmArgs("-XX:+EnableDynamicAgentLoading")
 }
+
+tasks.withType(JavaCompile).configureEach {
+	options.encoding = 'UTF-8'
+}
