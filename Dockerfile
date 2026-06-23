@@ -1,40 +1,12 @@
 # ==========================================
-# 1. 빌더 스테이지
-# ==========================================
-
-# JDK 25 기반 알파인 리눅스 빌드 환경 구성
-FROM eclipse-temurin:25-jdk-alpine AS builder
-
-# 작업 디렉토리 지정
-WORKDIR /app
-
-# 빌드 설정 파일 및 스크립트 복사
-COPY gradlew .
-COPY gradle gradle
-COPY build.gradle .
-COPY settings.gradle .
-
-# 스크립트 실행 권한 부여
-RUN chmod +x ./gradlew
-
-# 의존성 라이브러리 다운로드
-RUN ./gradlew dependencies --no-daemon
-
-# 애플리케이션 소스 코드 복사
-COPY src src
-
-# 테스트를 제외한 소스 코드 컴파일 및 패키징 수행
-RUN ./gradlew clean build -x test --no-daemon
-
-# ==========================================
-# 2. 추출 스테이지
+# 1. 추출 스테이지
 # ==========================================
 
 FROM eclipse-temurin:25-jre-alpine AS extractor
 WORKDIR /app
 
 # 빌드 스테이지 결과물(단일 .jar 파일) 복사
-COPY --from=builder /app/build/libs/*-SNAPSHOT.jar app.jar
+COPY build/libs/*-SNAPSHOT.jar app.jar
 
 # 단일 .jar 파일을 4개의 논리적 계층(Layer) 구조로 분해
 RUN java -Djarmode=layertools -jar app.jar extract
