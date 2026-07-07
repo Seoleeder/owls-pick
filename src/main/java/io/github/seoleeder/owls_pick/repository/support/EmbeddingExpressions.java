@@ -26,10 +26,7 @@ public class EmbeddingExpressions {
     public BooleanExpression isValidForEmbedding() {
         return game.title.isNotNull().and(game.title.trim().isNotEmpty())
                 .and(isNotAdultGame())
-                .and(
-                        Expressions.numberTemplate(Integer.class, "function('cardinality', {0})", tag.genres).gt(0)
-                                .or(Expressions.numberTemplate(Integer.class, "function('cardinality', {0})", tag.themes).gt(0))
-                )
+                .and(hasArrayData(tag.genres).or(hasArrayData(tag.themes)))
                 .and(reviewStat.reviewScoreDesc.isNotNull().and(reviewStat.reviewScoreDesc.trim().isNotEmpty()))
                 .and(reviewStat.reviewSummary.isNotNull().and(reviewStat.reviewSummary.trim().isNotEmpty()));
     }

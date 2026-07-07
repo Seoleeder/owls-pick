@@ -51,10 +51,20 @@ public class VectorEmbeddingRepositoryTest extends AbstractContainerBaseTest {
         Game similarGame = gameRepository.save(Game.builder().title("Similar Action RPG").build());
         Game completelyDifferentGame = gameRepository.save(Game.builder().title("Cozy Puzzle Game").build());
 
+        // [Given] 상태 필터링 검증을 위한 실패 데이터 세팅
+        Game failedGame = gameRepository.save(Game.builder().title("Failed Game").build());
+
         // [Given] 코사인 거리 방향성(각도) 검증을 위한 768차원 벡터 데이터 삽입
-        insertVectorEmbedding(targetGame.getId(), generateVectorString(1.0f, 0.0f));
-        insertVectorEmbedding(similarGame.getId(), generateVectorString(0.9f, 0.1f));
-        insertVectorEmbedding(completelyDifferentGame.getId(), generateVectorString(0.0f, 1.0f));
+        insertVectorEmbedding(targetGame.getId(), generateVectorString(1.0f, 0.0f), "SUCCESS");
+        insertVectorEmbedding(similarGame.getId(), generateVectorString(0.9f, 0.1f), "SUCCESS");
+        insertVectorEmbedding(completelyDifferentGame.getId(), generateVectorString(0.0f, 1.0f), "SUCCESS");
+
+        // [Given] FAILED 상태의 Null 벡터 데이터 삽입
+        jdbcTemplate.update(
+                "INSERT INTO vector_embedding (game_id, embedding, source_text, embedding_status) " +
+                        "VALUES (?, NULL, ?, ?)",
+                failedGame.getId(), "failed_source_text", "FAILED"
+        );
 
         entityManager.clear(); // 1차 캐시 비우기
 
@@ -99,13 +109,14 @@ public class VectorEmbeddingRepositoryTest extends AbstractContainerBaseTest {
     /**
      * VectorEmbedding 데이터 삽입 헬퍼 메서드
      */
-    private void insertVectorEmbedding(Long gameId, String vectorString) {
+    private void insertVectorEmbedding(Long gameId, String vectorString, String status) {
         jdbcTemplate.update(
-                "INSERT INTO vector_embedding (game_id, embedding, source_text) " +
-                        "VALUES (?, CAST(? AS vector), ?)",
+                "INSERT INTO vector_embedding (game_id, embedding, source_text, embedding_status) " +
+                        "VALUES (?, CAST(? AS vector), ?, ?)",
                 gameId,
                 vectorString,
-                "test_source_text"
+                "test_source_text",
+                status
         );
     }
 }

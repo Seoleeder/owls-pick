@@ -6,6 +6,7 @@ import io.github.seoleeder.owls_pick.global.config.properties.GenaiProperties;
 import io.github.seoleeder.owls_pick.global.response.CustomException;
 import io.github.seoleeder.owls_pick.global.response.ErrorCode;
 import io.github.seoleeder.owls_pick.repository.GameRepository;
+import io.github.seoleeder.owls_pick.repository.GenaiFailedTaskRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -23,6 +24,7 @@ import org.springframework.web.client.RestClientException;
 import java.net.URI;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -38,6 +40,9 @@ public class LocalizationServiceTest {
 
     @Mock
     private GameRepository gameRepository;
+
+    @Mock
+    private GenaiFailedTaskRepository failedTaskRepository;
 
     @Mock
     private RestClient localizationRestClient;
@@ -58,16 +63,22 @@ public class LocalizationServiceTest {
 
     @BeforeEach
     void setUp() {
-        // TransactionTemplate 콜백 실행 모킹
+        // TransactionTemplate의 반환값 유무에 따른 콜백 실행 모킹
         lenient().when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
             TransactionCallback<?> callback = invocation.getArgument(0);
             return callback.doInTransaction(mock(TransactionStatus.class));
         });
 
+        lenient().doAnswer(invocation -> {
+            Consumer<TransactionStatus> action = invocation.getArgument(0);
+            action.accept(mock(TransactionStatus.class));
+            return null;
+        }).when(transactionTemplate).executeWithoutResult(any());
+
         // GenaiProperties 초기화 및 주입
         lenient().when(genaiProperties.fastapiUrl()).thenReturn("http://localhost:8000");
         GenaiProperties.Localization.ChunkSize chunkSize = new GenaiProperties.Localization.ChunkSize(10, 100);
-        GenaiProperties.Localization localization = new GenaiProperties.Localization(chunkSize);
+        GenaiProperties.Localization localization = new GenaiProperties.Localization(chunkSize, 1000);
         lenient().when(genaiProperties.localization()).thenReturn(localization);
 
         // RestClient 체이닝 명시적 조립 및 모킹
@@ -79,31 +90,35 @@ public class LocalizationServiceTest {
     }
 
     @Test
-    @DisplayName("FastAPI 통신 장애 시 커스텀 예외 발생 확인")
+    @DisplayName("FastAPI 통신 장애 시 파이프라인 중단 없이 예외 격리 및 실패 작업 기록 확인")
     void processLocalizationChunk_CommunicationError_ThrowException() {
-        // [Given] 미번역 데이터 존재 상황 세팅
-        Game mockGame = mock(Game.class);
-        when(gameRepository.findUnlocalizedGames(10)).thenReturn(List.of(mockGame));
-
-        // [Given] API 통신 실패(Timeout) 상황 모킹
-        when(responseSpec.body(LocalizationBulkResponse.class))
-                .thenThrow(new RestClientException("Connection Timeout"));
-
-        // [When & Then] 통신 실패를 감지하여 커스텀 예외 발생 유무 확인
-        assertThatThrownBy(() -> localizationService.processLocalizationChunk(10))
-                .isInstanceOf(CustomException.class)
-                .hasMessageContaining(ErrorCode.FASTAPI_COMMUNICATION_FAILED.getMessage());
-    }
-
-    @Test
-    @DisplayName("정상 응답 시 게임 엔티티의 한글화 상태 업데이트 로직 호출 확인")
-    void processLocalizationChunk_Success_UpdateEntity() {
-        // [Given] 미번역 게임 엔티티 세팅
+        // [Given] 한글화 대상 미번역 게임 데이터 세팅
         Game mockGame = mock(Game.class);
         when(mockGame.getId()).thenReturn(1L);
         when(gameRepository.findUnlocalizedGames(10)).thenReturn(List.of(mockGame));
 
-        // [Given] API 통신 성공 및 정상 번역 결과 응답 모킹
+        // [Given] 외부 API 통신 타임아웃 예외 발생 상황 모킹
+        when(responseSpec.body(LocalizationBulkResponse.class))
+                .thenThrow(new RestClientException("Connection Timeout"));
+
+        // [When] 청크 단위 한글화 처리 로직 실행
+        int result = localizationService.processLocalizationChunk(10);
+
+        // [Then] 처리 흐름 유지를 위한 처리 건수 반환 및 실패 이력 테이블 적재 검증
+        assertThat(result).isEqualTo(1);
+        verify(failedTaskRepository, times(1)).saveAll(anyList());
+    }
+
+    @Test
+    @DisplayName("정상 응답 시 영속 상태 게임 엔티티의 한글화 텍스트 더티 체킹 유도 확인")
+    void processLocalizationChunk_Success_UpdateEntity() {
+        // [Given] 미번역 게임 엔티티 조회 및 필드 갱신을 위한 영속 상태 재조회 모킹
+        Game mockGame = mock(Game.class);
+        when(mockGame.getId()).thenReturn(1L);
+        when(gameRepository.findUnlocalizedGames(10)).thenReturn(List.of(mockGame));
+        when(gameRepository.findAllById(anyList())).thenReturn(List.of(mockGame));
+
+        // [Given] 한글화 엔진의 정상 번역 결과 응답 모킹
         LocalizationBulkResponse mockResponse = new LocalizationBulkResponse(true,
                 List.of(new LocalizationBulkResponse.ResultItem(1L, "설명_한글", "스토리_한글")));
         when(responseSpec.body(LocalizationBulkResponse.class)).thenReturn(mockResponse);
@@ -111,9 +126,8 @@ public class LocalizationServiceTest {
         // [When] 청크 단위 한글화 처리 로직 실행
         localizationService.processLocalizationChunk(10);
 
-        // [Then] 응답 데이터 기반 엔티티 갱신 및 DB 저장 로직 정상 호출 확인
+        // [Then] 응답 데이터 기반 엔티티 더티 체킹 갱신 로직 정상 호출 확인
         verify(mockGame, times(1)).updateLocalization("설명_한글", "스토리_한글");
-        verify(gameRepository, times(1)).saveAll(anyList());
     }
 
     @Test
@@ -125,26 +139,28 @@ public class LocalizationServiceTest {
         // [When] 청크 단위 한글화 처리 로직 실행
         int result = localizationService.processLocalizationChunk(10);
 
-        // [Then] 반환 건수 0건 확인 및 외부 API(RestClient) 미호출 확인
+        // [Then] 반환 건수 0건 확인 및 외부 API 통신 미발생 검증
         assertThat(result).isEqualTo(0);
         verify(localizationRestClient, never()).post();
     }
 
     @Test
-    @DisplayName("통신은 성공했으나 AI 논리적 실패(success=false) 반환 시 예외 발생 확인")
-    void processLocalizationChunk_LogicalFailure_ThrowException() {
-        // [Given] 미번역 게임 엔티티 세팅
+    @DisplayName("통신은 성공했으나 AI 논리적 에러(success=false) 반환 시 실패 작업 기록 확인")
+    void processLocalizationChunk_LogicalFailure_RecordFailure() {
+        // [Given] 한글화 대상 미번역 게임 데이터 세팅
         Game mockGame = mock(Game.class);
         when(gameRepository.findUnlocalizedGames(10)).thenReturn(List.of(mockGame));
 
-        // [Given] HTTP 통신은 성공이나 논리적 실패(success=false) 반환 상황 모킹
+        // [Given] HTTP 통신은 성공이나 논리적 실패(success=false) 응답 상황 모킹
         LocalizationBulkResponse mockResponse = new LocalizationBulkResponse(false, null);
         when(responseSpec.body(LocalizationBulkResponse.class)).thenReturn(mockResponse);
 
-        // [When & Then] 논리적 실패를 통신 예외로 변환하여 발생시키는지 확인
-        assertThatThrownBy(() -> localizationService.processLocalizationChunk(10))
-                .isInstanceOf(CustomException.class)
-                .hasMessageContaining(ErrorCode.FASTAPI_COMMUNICATION_FAILED.getMessage());
+        // [When] 청크 단위 한글화 처리 로직 실행
+        int result = localizationService.processLocalizationChunk(10);
+
+        // [Then] 논리적 에러를 통신 장애와 동일하게 취급하여 실패 이력 테이블 적재 검증
+        assertThat(result).isEqualTo(1);
+        verify(failedTaskRepository, times(1)).saveAll(anyList());
     }
 
     @Test

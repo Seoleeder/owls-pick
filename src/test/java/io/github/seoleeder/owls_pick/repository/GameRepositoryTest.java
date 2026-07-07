@@ -24,6 +24,7 @@ import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -40,6 +41,9 @@ public class GameRepositoryTest extends AbstractContainerBaseTest {
 
     @Autowired
     private TagRepository tagRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     private LocalDate targetReleaseDate;
 
@@ -170,7 +174,21 @@ public class GameRepositoryTest extends AbstractContainerBaseTest {
                 .descriptionKo("한국어 설명 완료")
                 .build();
 
+        // [Given] 한글화가 누락되었으나 '실패 이력'이 존재하는 데이터 세팅
+        Game failedGame = Game.builder()
+                .title("Failed Unlocalized Game")
+                .description("English Description")
+                .descriptionKo(null)
+                .build();
+
         gameRepository.saveAll(List.of(unlocalizedGame, localizedGame));
+
+        // 실패 이력 강제 삽입
+        jdbcTemplate.update(
+                "INSERT INTO genai_failed_task (pipeline_type, target_id, fail_reason, is_handled, created_at, updated_at) " +
+                        "VALUES (?, ?, ?, ?, NOW(), NOW())",
+                "GAME_LOCALIZATION", failedGame.getId(), "NETWORK_ERROR", false
+        );
 
         // [When] 한글화 대상(결측치) 조회 쿼리 실행
         List<Game> result = gameRepository.findUnlocalizedGames(10);
@@ -206,6 +224,24 @@ public class GameRepositoryTest extends AbstractContainerBaseTest {
                 .build();
 
         entityManager.persist(reviewStat);
+
+        // [Given] 임베딩 실패 이력(FAILED)이 존재하는 게임 데이터 세팅
+        Game failedGame = Game.builder().title("Failed Vector Game").description("Desc").isAdult(false).build();
+        gameRepository.save(failedGame);
+
+        Tag failedTag = Tag.builder().game(failedGame).genres(List.of("ACTION")).build();
+        tagRepository.save(failedTag);
+
+        ReviewStat failedStat = ReviewStat.builder().game(failedGame).reviewScoreDesc("Mixed").reviewSummary("Not bad").build();
+        entityManager.persist(failedStat);
+
+        // 실패 임베딩 레코드 강제 삽입 (vectorEmbedding.isNull() 조건에 의해 배제되는지 확인)
+        jdbcTemplate.update(
+                "INSERT INTO vector_embedding (game_id, embedding_status, source_text) VALUES (?, ?, ?)",
+                failedGame.getId(), "FAILED", "test_source"
+        );
+
+        entityManager.clear();
 
         // [When] 임베딩 대상 추출 쿼리 실행
         List<EmbeddingSourceDto> result = gameRepository.findGamesForEmbedding(10);

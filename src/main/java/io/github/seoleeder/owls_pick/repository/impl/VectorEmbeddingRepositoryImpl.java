@@ -2,6 +2,7 @@ package io.github.seoleeder.owls_pick.repository.impl;
 
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import io.github.seoleeder.owls_pick.entity.game.VectorEmbedding;
+import io.github.seoleeder.owls_pick.entity.game.enums.status.EmbeddingStatus;
 import io.github.seoleeder.owls_pick.repository.custom.VectorEmbeddingRepositoryCustom;
 import io.github.seoleeder.owls_pick.repository.support.EmbeddingExpressions;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +39,10 @@ public class VectorEmbeddingRepositoryImpl implements VectorEmbeddingRepositoryC
     @Override
     public List<VectorEmbedding> findTopSimilarGames(float[] queryVector, int limit) {
         return queryFactory.selectFrom(vectorEmbedding)
+                .where(
+                        // 임베딩 완료(SUCCESS) 상태의 유효 게임 데이터 필터링
+                        vectorEmbedding.embeddingStatus.eq(EmbeddingStatus.SUCCESS)
+                )
                 // 코사인 거리를 기준으로 오름차순 정렬
                 .orderBy(embeddingExpressions.calculateCosineDistance(queryVector).asc())
                 .limit(limit)

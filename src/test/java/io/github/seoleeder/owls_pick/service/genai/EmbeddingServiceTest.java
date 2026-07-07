@@ -5,8 +5,10 @@ import io.github.seoleeder.owls_pick.dto.response.EmbeddingBatchResponse;
 import io.github.seoleeder.owls_pick.entity.game.Game;
 import io.github.seoleeder.owls_pick.entity.game.VectorEmbedding;
 import io.github.seoleeder.owls_pick.entity.game.enums.status.EmbeddingStatus;
+import io.github.seoleeder.owls_pick.entity.genai.GenaiFailedTask;
 import io.github.seoleeder.owls_pick.global.config.properties.GenaiProperties;
 import io.github.seoleeder.owls_pick.repository.GameRepository;
+import io.github.seoleeder.owls_pick.repository.GenaiFailedTaskRepository;
 import io.github.seoleeder.owls_pick.repository.VectorEmbeddingRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -45,6 +47,9 @@ public class EmbeddingServiceTest {
 
     @Mock
     private VectorEmbeddingRepository vectorEmbeddingRepository;
+
+    @Mock
+    private GenaiFailedTaskRepository failedTaskRepository;
 
     @Mock
     private RestClient restClient;
@@ -177,41 +182,42 @@ public class EmbeddingServiceTest {
     }
 
     @Test
-    @DisplayName("FastAPI 통신 장애 발생 시 시스템 중단 없이 예외가 격리되는지 확인")
-    void processDataChunk_CommunicationError_ThrowException() {
+    @DisplayName("FastAPI 통신 장애 발생 시 파이프라인 락(Lock) 방지용 예외 격리 및 실패 내역 적재 확인")
+    void processDataChunk_CommunicationError_RecordFailure() {
         // [Given] 임베딩 처리 대상 데이터 세팅
         EmbeddingSourceDto mockDto = new EmbeddingSourceDto(1L, "Title", "Desc", List.of("RPG"), List.of("Fantasy"), List.of("Magic"), 40, "Positive", "Summary");
         when(gameRepository.findGamesForEmbedding(100)).thenReturn(List.of(mockDto));
 
-        // [Given] 외부 API 통신 실패(타임아웃 등 RestClientException) 상황 모킹
+        // [Given] 외부 API 통신 실패(타임아웃 등)로 인한 예외 상황 모킹
         when(responseSpec.body(eq(EmbeddingBatchResponse.class)))
                 .thenThrow(new RestClientException("Connection Timeout"));
 
-        // [When] 청크 단위 임베딩 데이터 분할 및 병렬 처리 실행
+        // [When] 청크 단위 임베딩 데이터 분할 및 처리 로직 실행
         int processedCount = embeddingService.processDataChunk(100);
 
-        // [Then] 내부 예외 발생에도 전체 프로세스 중단 없이 에러 격리 후 로직 완주(1건 반환) 검증
+        // [Then] 내부 예외 발생에도 전체 프로세스 중단 없이 에러 격리 후 로직 완주(1건 스레드 할당 반환) 검증
         assertThat(processedCount).isEqualTo(1);
 
-        // [Then] 통신 실패 시 DB 반영 로직(Transaction) 실행 차단 검증
-        verify(transactionTemplate, never()).execute(any());
+        // [Then] 통신 실패 건에 대해 실패 이력(FailedTask) 및 벡터(FAILED) 상태가 안전하게 저장되는지 검증
+        verify(failedTaskRepository, times(1)).saveAll(anyList());
+        verify(vectorEmbeddingRepository, times(1)).saveAll(anyList());
     }
 
     @Test
-    @DisplayName("AI 엔진으로부터 빈 응답(Invalid) 수신 시 DB 저장 로직 차단 확인")
+    @DisplayName("AI 엔진으로부터 빈 응답(Invalid) 수신 시 무의미한 DB 트랜잭션 차단 확인")
     void processDataChunk_InvalidResponse_SkipUpdate() {
         // [Given] 임베딩 처리 대상 데이터 세팅
         EmbeddingSourceDto mockDto = new EmbeddingSourceDto(1L, "Title", "Desc", List.of("RPG"), List.of("Fantasy"), List.of("Magic"), 40, "Positive", "Summary");
         when(gameRepository.findGamesForEmbedding(100)).thenReturn(List.of(mockDto));
 
-        // [Given] 통신 성공 후 비정상(Empty Results) 응답 수신 상황 모킹
+        // [Given] 통신 성공 후 비정상(Empty Results) 응답 반환 상황 모킹
         EmbeddingBatchResponse invalidResponse = new EmbeddingBatchResponse(Collections.emptyList());
         when(responseSpec.body(eq(EmbeddingBatchResponse.class))).thenReturn(invalidResponse);
 
-        // [When] 청크 단위 임베딩 처리 로직 실행
+        // [When] 청크 단위 임베딩 데이터 통신 및 처리 로직 실행
         embeddingService.processDataChunk(100);
 
-        // [Then] 응답 데이터 유효성 검증 실패에 따른 DB 반영 로직(Transaction) 실행 차단 검증
+        // [Then] 응답 데이터 유효성 검증 실패에 따른 무의미한 DB 반영 트랜잭션 개방 차단 검증
         verify(transactionTemplate, never()).execute(any());
     }
 }
