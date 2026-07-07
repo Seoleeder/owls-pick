@@ -52,3 +52,4 @@ create index if not exists idx_chat_session_user_id on chat_session (user_id);
 
 -- [chat_message] 채팅 메시지 기록
 create index if not exists idx_chat_message_session_id on chat_message (session_id);
+

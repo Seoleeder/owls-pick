@@ -1,7 +1,10 @@
 package io.github.seoleeder.owls_pick.repository.impl;
 
+import com.querydsl.jpa.JPAExpressions;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import io.github.seoleeder.owls_pick.entity.game.ReviewStat;
+import io.github.seoleeder.owls_pick.entity.genai.QGenaiFailedTask;
+import io.github.seoleeder.owls_pick.entity.genai.enums.GenaiPipelineType;
 import io.github.seoleeder.owls_pick.repository.custom.ReviewStatRepositoryCustom;
 import lombok.RequiredArgsConstructor;
 
@@ -41,8 +44,13 @@ public class ReviewStatRepositoryImpl implements ReviewStatRepositoryCustom {
                 .execute();
     }
 
+    /**
+     * 리뷰 수가 임계치 이상이면서 아직 요약되지 않은 데이터 조회 (미조치 실패 작업 제외)
+     */
     @Override
     public List<ReviewStat> findTargetsWithoutSummary(int minThreshold, int batchSize) {
+
+        QGenaiFailedTask failedTask = QGenaiFailedTask.genaiFailedTask;
 
         return queryFactory.selectFrom(reviewStat)
                 .where(
@@ -51,8 +59,21 @@ public class ReviewStatRepositoryImpl implements ReviewStatRepositoryCustom {
 
                         // 리뷰 요약 텍스트가 없는 데이터 필터링
                         reviewStat.reviewSummary.isNull()
-                                .or(reviewStat.reviewSummary.isEmpty())
+                                .or(reviewStat.reviewSummary.isEmpty()),
+
+                        // 미조치 실패 작업 목록에 존재하지 않는 데이터 필터링 (NOT EXISTS)
+                        JPAExpressions
+                                .selectOne()
+                                .from(failedTask)
+                                .where(
+                                        failedTask.targetId.eq(reviewStat.game.id),
+                                        failedTask.pipelineType.eq(GenaiPipelineType.STEAM_REVIEW_SUMMARY),
+                                        failedTask.isHandled.eq(false)
+                                )
+                                .notExists()
                 )
+                // 리뷰가 많은 게임부터 요약을 수행하도록 필터링
+                .orderBy(reviewStat.totalReview.desc())
                 .limit(batchSize)
                 .fetch();
     }

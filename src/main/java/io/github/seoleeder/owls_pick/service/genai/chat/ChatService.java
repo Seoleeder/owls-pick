@@ -17,15 +17,19 @@ import io.github.seoleeder.owls_pick.repository.ChatMessageRepository;
 import io.github.seoleeder.owls_pick.repository.ChatSessionRepository;
 import io.github.seoleeder.owls_pick.repository.UserRepository;
 import io.github.seoleeder.owls_pick.repository.VectorEmbeddingRepository;
+import io.github.seoleeder.owls_pick.service.genai.chat.event.SessionTitleGenerateEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.util.UriComponentsBuilder;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -41,6 +45,7 @@ public class ChatService {
     private final UserRepository userRepository;
     private final TransactionTemplate transactionTemplate;
     private final RestClient restClient;
+    private final ApplicationEventPublisher eventPublisher;
     private final GenaiProperties props;
 
     private static final int MAX_TITLE_LENGTH = 30; // 세션 타이틀 최대 길이
@@ -53,6 +58,7 @@ public class ChatService {
             UserRepository userRepository,
             TransactionTemplate transactionTemplate,
             @Qualifier("chatRestClient") RestClient restClient,
+            ApplicationEventPublisher eventPublisher,
             GenaiProperties props) {
         this.chatTrafficService = chatTrafficService;
         this.chatSessionRepository = chatSessionRepository;
@@ -61,6 +67,7 @@ public class ChatService {
         this.userRepository = userRepository;
         this.transactionTemplate = transactionTemplate;
         this.restClient = restClient;
+        this.eventPublisher = eventPublisher;
         this.props = props;
     }
 
@@ -74,19 +81,35 @@ public class ChatService {
      */
     public ChatResponse processRagChat(Long userId, ChatRequest request) {
 
-        // FastAPI 통신 전 동시성 제어 및 트래픽 제한 검증
+        // 락 점유 전 유저 발화문 사전 검증
+        if (request.userMessage() == null || request.userMessage().trim().isEmpty()) {
+            throw new CustomException(ErrorCode.INVALID_INPUT_VALUE);
+        }
+
+        // 동시성 제어 및 트래픽 제한 검증을 위한 분산 락 획득
         chatTrafficService.checkTrafficAndAcquireLock(userId);
 
         try {
+            boolean isNewSession = request.sessionId() == null;
 
-            // 초기 DB 작업 단일 트랜잭션 처리
+            // 신규 세션일 경우 임시 타이틀 할당
+            String initialTitle = null;
+            if (isNewSession) {
+                initialTitle = request.userMessage().length() > MAX_TITLE_LENGTH
+                        ? request.userMessage().substring(0, MAX_TITLE_LENGTH - 3) + "..."
+                        : request.userMessage();
+            }
+
+            final String finalTitle = initialTitle;
+
+            // 채팅 세션 생성 및 유저 메시지 저장 트랜잭션 분리 수행
             ChatInitData chatInitData = transactionTemplate.execute(status -> {
 
                 // 채팅 세션 및 최근 대화 내역 조회
-                ChatSession session = getOrCreateSession(userId, request);
+                ChatSession session = getOrCreateSession(userId, request, finalTitle);
                 List<ChatHistoryDto> history = getChatHistory(session.getId(), props.chat().historyLimit());
 
-                // 사용자 메시지 저장
+                // 해당 세션에 유저의 채팅 메시지 저장
                 saveChatMessage(session, ChatRole.USER, request.userMessage());
 
                 return new ChatInitData(session, history);
@@ -97,17 +120,16 @@ public class ChatService {
             ChatSession session = chatInitData.session();
             List<ChatHistoryDto> history = chatInitData.history();
 
+            // 신규 세션인 경우 DB 커밋 완료 후 비동기 타이틀 생성 이벤트 발행
+            if (isNewSession) {
+                eventPublisher.publishEvent(new SessionTitleGenerateEvent(session.getId(), request.userMessage()));
+            }
+
             // 메시지 벡터 임베딩 추출 (사용자 메시지 + 최근 대화 내역)
             float[] queryVector = fetchQueryEmbedding(history, request.userMessage());
 
             // 벡터 유사도 기반 상위 연관 게임 검색
             List<VectorEmbedding> similarGames = vectorEmbeddingRepository.findTopSimilarGames(queryVector, 5);
-
-            // 연관 게임 조회 실패 시 예외 처리
-            if (similarGames.isEmpty()) {
-                throw new CustomException(ErrorCode.NOT_FOUND_GAME);
-            }
-
 
             // Vector DB 검색 결과 상세 추적 (데이터 유실 구간 파악)
             if (log.isDebugEnabled()) {
@@ -123,19 +145,19 @@ public class ChatService {
             }
 
             // 연관 게임의 원본 메타데이터 추출
-            List<String> contexts = similarGames.stream()
-                    .map(VectorEmbedding::getSourceText)
-                    .toList();
+            // 유사도 검색 실패 시 에러 대신 빈 컨텍스트를 넘겨 일반 답변으로 유도
+            List<String> contexts = similarGames.isEmpty()
+                    ? Collections.emptyList()
+                    : similarGames.stream().map(VectorEmbedding::getSourceText).toList();
 
             // RAG 기반 최종 응답 생성
             String reply = fetchGeneratedChat(history, request.userMessage(), contexts);
 
-            // 응답 메시지 저장 (내부 트랜잭션 적용)
+            // 생성된 답변 메시지 저장
             transactionTemplate.executeWithoutResult(status ->
                     saveChatMessage(session, ChatRole.ASSISTANT, reply)
             );
 
-            // 최종 응답 반환
             return new ChatResponse(session.getId(), reply);
         } finally {
             // 로직 수행 완료 및 예외 발생 여부와 무관하게 점유한 분산 락 반환
@@ -146,7 +168,7 @@ public class ChatService {
     /**
      * 유효한 채팅 세션 반환 또는 신규 세션 생성
      */
-    private ChatSession getOrCreateSession(Long userId, ChatRequest request) {
+    private ChatSession getOrCreateSession(Long userId, ChatRequest request, String title) {
         if (request.sessionId() != null) {
             return chatSessionRepository.findById(request.sessionId())
                     .orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND_SESSION));
@@ -155,43 +177,11 @@ public class ChatService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND_USER));
 
-
-        // 사용자의 첫 발화를 기반으로 세션 타이틀 생성
-        String title = fetchGeneratedTitle(request.userMessage());
-
         // 신규 세션 저장
         return chatSessionRepository.save(ChatSession.builder()
                 .user(user)
                 .title(title)
                 .build());
-    }
-
-    /**
-     * FastAPI 기반 세션 타이틀 요약 요청 및 반환
-     */
-    private String fetchGeneratedTitle(String userMessage) {
-        try {
-            TitleGenerationResponse response = restClient.post()
-                    .uri(props.fastapiUrl() + "/api/genai/chat/title/generate")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(new TitleGenerationRequest(userMessage))
-                    .retrieve()
-                    .body(TitleGenerationResponse.class);
-
-            if (response != null && response.title() != null && !response.title().isBlank()) {
-                // 세션 타이틀 최대 길이 제한 적용
-                return response.title().length() > MAX_TITLE_LENGTH
-                        ? response.title().substring(0, MAX_TITLE_LENGTH - 3) + "..."
-                        : response.title();
-            }
-        } catch (RestClientException e) {
-            log.warn("[ChatService] Failed to generate title from FastAPI, using fallback logic. Error: {}", e.getMessage());
-        }
-
-        // 통신 실패 시 원본 메시지 기준 최대 길이 제한 적용
-        return userMessage.length() > MAX_TITLE_LENGTH
-                ? userMessage.substring(0, MAX_TITLE_LENGTH - 3) + "..."
-                : userMessage;
     }
 
     /**
@@ -249,9 +239,14 @@ public class ChatService {
      * FastAPI 서버에 메시지 임베딩 요청 및 응답 반환
      */
     private float[] fetchQueryEmbedding(List<ChatHistoryDto> history, String userMessage) {
+        URI targetUri = UriComponentsBuilder.fromUriString(props.fastapiUrl())
+                .path("/api/genai/chat/embeddings/query")
+                .build()
+                .toUri();
+
         try {
             QueryEmbeddingResponse response = restClient.post()
-                    .uri(props.fastapiUrl() + "/api/genai/chat/embeddings/query")
+                    .uri(targetUri)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(new QueryEmbeddingRequest(history, userMessage))
                     .retrieve()
@@ -272,9 +267,14 @@ public class ChatService {
      * FastAPI 서버에 RAG 프롬프트 기반 텍스트 생성 요청
      */
     private String fetchGeneratedChat(List<ChatHistoryDto> history, String userMessage, List<String> contexts) {
+        URI targetUri = UriComponentsBuilder.fromUriString(props.fastapiUrl())
+                .path("/api/genai/chat/generate")
+                .build()
+                .toUri();
+
         try {
             RagGenerationResponse response = restClient.post()
-                    .uri(props.fastapiUrl() + "/api/genai/chat/title/generate")
+                    .uri(targetUri)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(new RagGenerationRequest(history, userMessage, contexts))
                     .retrieve()

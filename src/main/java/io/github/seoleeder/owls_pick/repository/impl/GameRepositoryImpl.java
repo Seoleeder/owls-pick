@@ -2,6 +2,7 @@ package io.github.seoleeder.owls_pick.repository.impl;
 
 import com.querydsl.core.Tuple;
 import com.querydsl.core.types.Projections;
+import com.querydsl.jpa.JPAExpressions;
 import com.querydsl.jpa.impl.JPAQuery;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import io.github.seoleeder.owls_pick.dto.embedding.EmbeddingSourceDto;
@@ -9,6 +10,8 @@ import io.github.seoleeder.owls_pick.dto.request.GameSearchConditionRequest;
 import io.github.seoleeder.owls_pick.dto.response.SearchFilterMetadataResponse;
 import io.github.seoleeder.owls_pick.entity.game.Game;
 import io.github.seoleeder.owls_pick.entity.game.enums.GameSortType;
+import io.github.seoleeder.owls_pick.entity.genai.QGenaiFailedTask;
+import io.github.seoleeder.owls_pick.entity.genai.enums.GenaiPipelineType;
 import io.github.seoleeder.owls_pick.global.util.RestPage;
 import io.github.seoleeder.owls_pick.repository.custom.GameRepositoryCustom;
 import io.github.seoleeder.owls_pick.repository.dto.GameDetailCoreDto;
@@ -532,11 +535,24 @@ public class GameRepositoryImpl implements GameRepositoryCustom {
      */
     @Override
     public List<Game> findUnlocalizedGames(int limit) {
+        QGenaiFailedTask failedTask = QGenaiFailedTask.genaiFailedTask;
+
         return queryFactory
                 .selectFrom(game)
                 .where(
                         localizationExpressions.needsDescriptionLocalization(game)
-                                .or(localizationExpressions.needsStorylineLocalization(game))
+                                .or(localizationExpressions.needsStorylineLocalization(game)),
+
+                        // 미조치 실패 작업 목록에 존재하지 않는 데이터 필터링
+                        JPAExpressions
+                                .selectOne()
+                                .from(failedTask)
+                                .where(
+                                        failedTask.targetId.eq(game.id),
+                                        failedTask.pipelineType.eq(GenaiPipelineType.GAME_LOCALIZATION),
+                                        failedTask.isHandled.eq(false)
+                                )
+                                .notExists()
                 )
                 .orderBy(game.id.asc())
                 .limit(limit)

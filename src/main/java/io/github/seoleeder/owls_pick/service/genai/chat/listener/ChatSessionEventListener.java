@@ -43,7 +43,7 @@ public class ChatSessionEventListener {
         log.info("[Async - ChatService] Starting background title generation for Session ID: {}", event.sessionId());
 
         try {
-            // FastAPI 타이틀 요약 API 호출
+            // FastAPI 세션 타이틀 생성 API 호출
             TitleGenerationResponse response = restClient.post()
                     .uri(props.fastapiUrl() + "/api/genai/chat/title/generate")
                     .contentType(MediaType.APPLICATION_JSON)

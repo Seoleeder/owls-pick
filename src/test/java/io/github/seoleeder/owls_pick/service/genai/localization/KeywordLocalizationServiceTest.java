@@ -3,7 +3,10 @@ package io.github.seoleeder.owls_pick.service.genai.localization;
 import io.github.seoleeder.owls_pick.dto.response.KeywordLocalizationBulkResponse;
 import io.github.seoleeder.owls_pick.entity.game.KeywordDictionary;
 import io.github.seoleeder.owls_pick.entity.game.Tag;
+import io.github.seoleeder.owls_pick.entity.genai.GenaiFailedTask;
+import io.github.seoleeder.owls_pick.entity.genai.enums.GenaiPipelineType;
 import io.github.seoleeder.owls_pick.global.config.properties.GenaiProperties;
+import io.github.seoleeder.owls_pick.repository.GenaiFailedTaskRepository;
 import io.github.seoleeder.owls_pick.repository.KeywordDictionaryRepository;
 import io.github.seoleeder.owls_pick.repository.TagRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,8 +20,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
 import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 
 import java.net.URI;
 import java.util.List;
@@ -42,6 +47,9 @@ public class KeywordLocalizationServiceTest {
     private TagRepository tagRepository;
 
     @Mock
+    private GenaiFailedTaskRepository failedTaskRepository;
+
+    @Mock
     private RestClient localizationRestClient;
 
     @Mock
@@ -62,17 +70,22 @@ public class KeywordLocalizationServiceTest {
 
     @BeforeEach
     void setUp() {
-        // TransactionTemplate 콜백 실행 모킹
+        // TransactionTemplate의 반환값 유무에 따른 콜백 실행 모킹
         lenient().doAnswer(invocation -> {
             Consumer<TransactionStatus> action = invocation.getArgument(0);
             action.accept(mock(TransactionStatus.class));
             return null;
         }).when(transactionTemplate).executeWithoutResult(any());
 
+        lenient().when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
+            TransactionCallback<?> callback = invocation.getArgument(0);
+            return callback.doInTransaction(mock(TransactionStatus.class));
+        });
+
         // GenaiProperties 초기화 및 주입
         lenient().when(genaiProperties.fastapiUrl()).thenReturn("http://localhost:8000");
         GenaiProperties.Localization.ChunkSize chunkSize = new GenaiProperties.Localization.ChunkSize(10, 100);
-        GenaiProperties.Localization localization = new GenaiProperties.Localization(chunkSize);
+        GenaiProperties.Localization localization = new GenaiProperties.Localization(chunkSize, 1000);
         lenient().when(genaiProperties.localization()).thenReturn(localization);
 
         // RestClient 체이닝 명시적 조립 및 모킹
@@ -143,5 +156,54 @@ public class KeywordLocalizationServiceTest {
         // [Then] 총 3건 반환 확인 및 설정된 청크 크기에 따른 API 다중 호출(2회 분할) 검증
         assertThat(processed).isEqualTo(3);
         verify(localizationRestClient, times(2)).post();
+    }
+
+    @Test
+    @DisplayName("키워드 한글화 통신 장애 시 파이프라인 중단 없이 실패 작업 기록 확인")
+    void processUnlocalizedKeywords_CommunicationError_RecordFailure() {
+        // [Given] 한글화 대상 미번역 키워드 사전 데이터 세팅
+        KeywordDictionary mockDict = mock(KeywordDictionary.class);
+        when(mockDict.getId()).thenReturn(1L);
+        when(dictionaryRepository.findUnlocalizedKeywords()).thenReturn(List.of(mockDict));
+
+        // [Given] 외부 API 통신 타임아웃 예외 발생 상황 모킹
+        when(responseSpec.body(KeywordLocalizationBulkResponse.class))
+                .thenThrow(new RestClientException("Connection Timeout"));
+
+        // [When] 청크 단위 키워드 처리 로직 실행
+        int processed = keywordLocalizationService.processUnlocalizedKeywords(10, true);
+
+        // [Then] 파이프라인 중단을 막기 위한 예외 격리 처리 및 실패 이력 적재 검증
+        assertThat(processed).isEqualTo(1);
+        verify(failedTaskRepository, times(1)).saveAll(anyList());
+    }
+
+    @Test
+    @DisplayName("미조치 실패 작업(FailedTask) 재시도 시 정상 통신 및 조치 상태 갱신 확인")
+    void retryFailedTasks_Success() {
+        // [Given] 미조치 실패 이력 및 연결된 원본 키워드 사전 데이터 세팅
+        GenaiFailedTask mockTask = mock(GenaiFailedTask.class);
+        when(mockTask.getId()).thenReturn(100L);
+        when(mockTask.getTargetId()).thenReturn(1L);
+        when(failedTaskRepository.findUnhandledTasks(GenaiPipelineType.KEYWORD_LOCALIZATION))
+                .thenReturn(List.of(mockTask));
+
+        KeywordDictionary mockDict = mock(KeywordDictionary.class);
+        when(mockDict.getEngName()).thenReturn("Action");
+        when(dictionaryRepository.findAllById(anyList())).thenReturn(List.of(mockDict));
+
+        // [Given] AI 엔진의 재시도 정상 번역 결과 응답 모킹
+        KeywordLocalizationBulkResponse mockResponse = new KeywordLocalizationBulkResponse(
+                List.of(new KeywordLocalizationBulkResponse.KeywordLocalizationResponse("Action", "액션")));
+        when(responseSpec.body(KeywordLocalizationBulkResponse.class)).thenReturn(mockResponse);
+
+        when(failedTaskRepository.findAllById(anyList())).thenReturn(List.of(mockTask));
+
+        // [When] 실패 작업 복구 파이프라인 실행
+        keywordLocalizationService.retryFailedTasks();
+
+        // [Then] 사전 데이터 더티 체킹 갱신 및 실패 이력 조치 완료 상태(markAsHandled) 변경 확인
+        verify(mockDict, times(1)).updateLocalization("액션");
+        verify(mockTask, times(1)).markAsHandled();
     }
 }

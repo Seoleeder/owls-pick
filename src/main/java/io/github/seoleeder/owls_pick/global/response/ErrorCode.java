@@ -21,6 +21,7 @@ public enum ErrorCode {
     INVALID_PLAYTIME_RANGE(40005, HttpStatus.BAD_REQUEST, "최소 플레이타임은 최대 플레이타임보다 클 수 없습니다."),
     SEARCH_KEYWORD_TOO_LONG(40006, HttpStatus.BAD_REQUEST, "검색어는 최대 50자까지만 입력 가능합니다."),
 
+    INVALID_INPUT_VALUE(40007, HttpStatus.BAD_REQUEST, "잘못된 입력값입니다."),
 
     // 401 Unauthorized
     UNAUTHORIZED(40100, HttpStatus.UNAUTHORIZED, "인증이 유효하지 않습니다"),
@@ -36,14 +37,13 @@ public enum ErrorCode {
     UNCONSENTED_NOTIFICATION(40301,HttpStatus.FORBIDDEN, "알림 수신에 동의하지 않은 사용자입니다."),
     NOT_SESSION_OWNER(40302, HttpStatus.FORBIDDEN, "해당 채팅 세션에 대한 권한이 없습니다."),
 
-
     // 404 Not Found
     NOT_FOUND_END_POINT(40400, HttpStatus.NOT_FOUND, "존재하지 않는 API입니다."),
     NOT_FOUND_USER(40401, HttpStatus.NOT_FOUND, "존재하지 않는 사용자입니다."),
     NOT_FOUND_GAME(40402, HttpStatus.NOT_FOUND, "존재하지 않는 게임입니다."),
     NOT_FOUND_NOTIFICATION(40403, HttpStatus.NOT_FOUND, "존재하지 않는 알림입니다."),
     NOT_FOUND_SESSION(40404, HttpStatus.NOT_FOUND, "존재하지 않는 세션입니다."),
-
+    NOT_FOUND_REVIEW_STAT(40405, HttpStatus.NOT_FOUND, "존재하지 않는 리뷰 통계 데이터입니다."),
 
     // 409 Conflict
     CONFLICT(40900,HttpStatus.CONFLICT,""),

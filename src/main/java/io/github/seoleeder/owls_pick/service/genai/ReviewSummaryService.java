@@ -3,9 +3,13 @@ package io.github.seoleeder.owls_pick.service.genai;
 import io.github.seoleeder.owls_pick.dto.request.ReviewSummaryRequest;
 import io.github.seoleeder.owls_pick.dto.response.ReviewSummaryResponse;
 import io.github.seoleeder.owls_pick.entity.game.ReviewStat;
+import io.github.seoleeder.owls_pick.entity.genai.GenaiFailedTask;
+import io.github.seoleeder.owls_pick.entity.genai.enums.GenaiFailReason;
+import io.github.seoleeder.owls_pick.entity.genai.enums.GenaiPipelineType;
 import io.github.seoleeder.owls_pick.global.config.properties.GenaiProperties;
 import io.github.seoleeder.owls_pick.global.response.CustomException;
 import io.github.seoleeder.owls_pick.global.response.ErrorCode;
+import io.github.seoleeder.owls_pick.repository.GenaiFailedTaskRepository;
 import io.github.seoleeder.owls_pick.repository.ReviewRepository;
 import io.github.seoleeder.owls_pick.repository.ReviewStatRepository;
 import lombok.extern.slf4j.Slf4j;
@@ -13,6 +17,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.util.UriComponentsBuilder;
@@ -33,13 +38,9 @@ public class ReviewSummaryService {
     private final ReviewRepository reviewRepository;
     private final RestClient restClient;
     private final AsyncTaskExecutor taskExecutor; // Trace ID 전파 및 가상 스레드 처리를 지원하는 스프링 메인 실행기
+    private final TransactionTemplate transactionTemplate;
+    private final GenaiFailedTaskRepository failedTaskRepository;
     private final GenaiProperties props;
-
-    // 총 리뷰 수가 임계치 넘지만 실제 리뷰는 없는 게임 스킵 마킹 상수
-    public static final String INSUFFICIENT_DATA_FLAG = "INSUFFICIENT_REVIEW_DATA";
-
-    // 리뷰 요약에 실패한 게임 스킵 마킹 상수
-    public static final String SUMMARY_FAILED_FLAG = "SUMMARY_GENERATION_FAILED";
 
     public ReviewSummaryService(
             ReviewStatRepository reviewStatRepository,
@@ -47,39 +48,48 @@ public class ReviewSummaryService {
             @Qualifier("genaiRestClient") RestClient restClient,
             // 분산 추적(Trace ID) 설정이 내장된 실행기 지정 주입
             @Qualifier("applicationTaskExecutor") AsyncTaskExecutor taskExecutor,
-            GenaiProperties props) {
+            GenaiProperties props,
+            TransactionTemplate transactionTemplate,
+            GenaiFailedTaskRepository failedTaskRepository) {
         this.reviewStatRepository = reviewStatRepository;
         this.reviewRepository = reviewRepository;
         this.restClient = restClient;
         this.taskExecutor = taskExecutor;
         this.props = props;
+        this.transactionTemplate = transactionTemplate;
+        this.failedTaskRepository = failedTaskRepository;
     }
 
     /**
-     * 환경 변수에 설정된 기본 배치 사이즈로 리뷰 요약 파이프라인 실행
+     * 환경 변수에 설정된 기본 배치 사이즈로 파이프라인 실행
      */
     public void runPipeline() {
         runPipeline(props.review().batchSize());
     }
 
     /**
-     * 지정된 배치 사이즈 단위로 리뷰 요약 파이프라인 무한 루프 실행
+     * 지정된 배치 사이즈 단위로 파이프라인 연속 실행
      */
     public void runPipeline(int batchSize) {
         log.info("[GenAI] Starting Review Summary Pipeline with batch size {}...", batchSize);
         int totalProcessed = 0;
 
         while (true) {
-            int processedCount = processSingleBatch(batchSize);
+            try {
+                int processedCount = processSingleBatch(batchSize);
 
-            if (processedCount == 0) {
-                break; // 처리할 대상이 없으면 루프 탈출
+                if (processedCount == 0) {
+                    break; // 처리할 대상이 없으면 루프 탈출
+                }
+                totalProcessed += processedCount;
+            } catch (Exception e) {
+                // 특정 배치 처리 중 예상치 못한 예외 발생 시 전체 루프 중단 방지
+                log.error("[GenAI] Failed to process review summary batch. Skipping to next cycle.", e);
             }
-            totalProcessed += processedCount;
 
             try {
-                // API 부하 방지를 위한 2초 딜레이
-                Thread.sleep(2000);
+                // API 부하 방지를 위한 대기 시간 적용
+                Thread.sleep(props.review().delayMs());
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 log.error("[GenAI] Review Summary Pipeline sleep interrupted", e);
@@ -91,12 +101,12 @@ public class ReviewSummaryService {
     }
 
     /**
-     * 단일 배치 리뷰 요약 파이프라인 실행
+     * 단일 배치에 포함된 리뷰 요약 파이프라인 실행
      */
     public int processSingleBatch(int batchSize) {
         int minThreshold = props.review().minThreshold();
 
-        // 리뷰 수가 임계치 이상이면서 리뷰가 요약되지 않은 게임 조회
+        // 리뷰 수가 임계치 이상이면서 아직 요약되지 않은 게임 조회
         List<ReviewStat> targets = reviewStatRepository.findTargetsWithoutSummary(minThreshold, batchSize);
 
         if (targets.isEmpty()) {
@@ -105,20 +115,15 @@ public class ReviewSummaryService {
 
         log.info("[GenAI] Processing a single batch. Target count: {}", targets.size());
 
-        // 리뷰 요약 메서드 비동기 병렬 실행
+        // 리뷰 요약 작업을 비동기 스레드 풀에 할당
         // taskExecutor: 부모 스레드의 MDC 상태(Trace ID)를 신규 스레드로 자동 복사
         List<CompletableFuture<Void>> futures = targets.stream()
                 .map(stat -> CompletableFuture.runAsync(() -> {
-                    try {
-                        processSingleGameSummary(stat);
-                    } catch (Exception e) {
-                        // 단일 게임 처리 실패 시 고립 (전체 배치 영향 X)
-                        log.error("[GenAI] Unexpected error for Game ID: {}. Skipping.", stat.getGame().getId(), e);
-                    }
+                    processSingleGameSummary(stat);
                 }, taskExecutor))
                 .toList();
 
-        // 현재 배치의 모든 비동기 작업이 완료될 때까지 대기
+        // 현재 배치의 모든 비동기 작업 완료 대기
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
         return targets.size();
@@ -126,30 +131,94 @@ public class ReviewSummaryService {
 
     /**
      * 단일 게임의 리뷰 요약 실행 (조회 -> FastAPI 통신 -> DB 업데이트)
+     * 예외 발생 시 사유별 실패 작업 적재
      */
     private void processSingleGameSummary(ReviewStat stat) {
         Long gameId = stat.getGame().getId();
+        Long reviewStatId = stat.getId();
 
-        List<String> reviewTexts = extractReviewTexts(gameId);
+        try {
+            // 단일 게임 리뷰 텍스트 목록 추출
+            List<String> reviewTexts = extractReviewTexts(gameId);
 
-        // 유효한 리뷰 텍스트가 없는 경우 스킵 마킹 처리 후 즉시 반환
-        if (reviewTexts.isEmpty()) {
-            markAsInsufficientData(stat);
+            // 유효한 리뷰 텍스트가 없는 경우 실패 작업 기록 후 종료
+            if (reviewTexts.isEmpty()) {
+                log.warn("[GenAI] Insufficient valid reviews for Game ID: {}. Recording to FailedTask.", gameId);
+                recordFailedTask(gameId, GenaiFailReason.INSUFFICIENT_DATA);
+                return;
+            }
+
+            // 리뷰 요약 엔진 통신
+            ReviewSummaryResponse response = requestSummaryToFastApi(gameId, stat, reviewTexts);
+
+            // 수신된 리뷰 요약 응답 데이터 유효성 검증 및 분기 처리
+            if (isValidResponse(response)) {
+                applySummaryResult(reviewStatId, response);
+            } else {
+                log.warn("[GenAI] AI returned invalid summary for Game ID: {}. Recording to FailedTask.", gameId);
+                recordFailedTask(gameId, GenaiFailReason.INVALID_RESPONSE);
+            }
+        } catch (Exception e) {
+            // 통신 장애 등 예외 발생 시 실패 작업 기록
+            // 추후 FastAPI에서 안전 필터 거부 시 HTTP Error 코드를 반환하도록 수정되면 여기서 분기 처리 가능
+            log.error("[GenAI] Unexpected error processing Game ID: {}. Recording to FailedTask.", gameId, e);
+            recordFailedTask(gameId, GenaiFailReason.NETWORK_ERROR);
+        }
+    }
+
+    /**
+     * 스팀 리뷰 요약 미조치 실패 작업 재시도
+     */
+    public void retryFailedTasks() {
+        // 미조치 리뷰 요약 실패 내역 일괄 조회
+        List<GenaiFailedTask> failedTasks = failedTaskRepository.findUnhandledTasks(GenaiPipelineType.STEAM_REVIEW_SUMMARY);
+
+        if (failedTasks.isEmpty()) {
             return;
         }
 
-        ReviewSummaryResponse response = requestSummaryToFastApi(gameId, stat, reviewTexts);
+        log.info("[GenAI] Retrying {} failed Review Summary tasks...", failedTasks.size());
 
-        if (isValidResponse(response)) {
-            // FastAPI가 반환한 텍스트가 실패 플래그인지 확인
-            if (SUMMARY_FAILED_FLAG.equals(response.summaryText())) {
-                markAsSummaryFailed(stat);
-            } else {
-                // 정상적인 요약 텍스트라면 기존대로 업데이트
-                applySummaryResult(stat, response);
+        // 대상 실패 작업을 순회하며 단건 재시도 수행
+        for (GenaiFailedTask task : failedTasks) {
+            Long gameId = task.getTargetId();
+            try {
+                // 실패 작업의 식별자를 기반으로 리뷰 통계 엔티티 조회
+                ReviewStat stat = reviewStatRepository.findById(gameId)
+                        .orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND_REVIEW_STAT));
+
+                // 단일 게임에 대한 리뷰 텍스트 목록 추출
+                List<String> reviewTexts = extractReviewTexts(gameId);
+
+                if (reviewTexts.isEmpty()) {
+                    log.warn("[GenAI] Insufficient valid reviews for Game ID: {}. Skipping.", gameId);
+                    continue;
+                }
+
+                // 리뷰 요약 엔진으로 재요청 통신
+                ReviewSummaryResponse response = requestSummaryToFastApi(gameId, stat, reviewTexts);
+
+                // 응답 유효성 검증 후 DB 반영 및 상태 갱신
+                if (isValidResponse(response)) {
+                    // 리뷰 요약 결과 DB 반영
+                    applySummaryResult(stat.getId(), response);
+
+                    // 실패 작업 조치 완료(isHandled) 상태 갱신
+                    transactionTemplate.executeWithoutResult(status -> {
+                        GenaiFailedTask managedTask = failedTaskRepository.findById(task.getId()).orElseThrow();
+                        managedTask.markAsHandled();
+                    });
+                }
+            } catch (Exception e) {
+                // 단건 재시도 실패 시 예외 격리 및 다음 루프 진행
+                log.error("[GenAI] Failed to retry Review Summary for Game ID: {}. Skipping.", gameId, e);
             }
         }
     }
+
+    // ---------------------------------------------------------------------------------
+    // Helper Methods
+    // ---------------------------------------------------------------------------------
 
     /**
      * 특정 게임의 리뷰 텍스트 리스트 조회
@@ -204,33 +273,34 @@ public class ReviewSummaryService {
     /**
      * 스팀 리뷰 요약 결과 및 추출된 긍정/부정 키워드 업데이트
      */
-    public void applySummaryResult(ReviewStat stat, ReviewSummaryResponse response) {
-        stat.updateReviewSummary(
-                response.summaryText(),
-                response.positiveKeywords(),
-                response.negativeKeywords()
-        );
+    public void applySummaryResult(Long reviewStatId, ReviewSummaryResponse response) {
+        transactionTemplate.executeWithoutResult(status -> {
+            // 병렬 처리 환경에서 최신 상태를 유지하기 위해 원본 데이터를 다시 읽어온 후 업데이트
+            ReviewStat managedStat = reviewStatRepository.findById(reviewStatId)
+                    .orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND_REVIEW_STAT));
 
-        reviewStatRepository.save(stat);
-        log.info("[GenAI] Successfully updated summary and keywords for Game ID: {}", stat.getGame().getId());
+            // 요약 텍스트 및 긍정/부정 키워드 매핑
+            managedStat.updateReviewSummary(
+                    response.summaryText(),
+                    response.positiveKeywords(),
+                    response.negativeKeywords()
+            );
+        });
+        log.info("[GenAI] Successfully updated summary and keywords for ReviewStat ID: {}", reviewStatId);
     }
 
     /**
-     * 임계치 필터링을 통과했으나, 리뷰 데이터가 없는 게임 스킵 마킹 (무한 재조회 방지)
+     * 추후 재시도 및 통계를 위한 실패 대상 식별자 및 실패 사유 적재
      */
-    public void markAsInsufficientData(ReviewStat stat) {
-        // 텍스트 필드에만 플래그 넣고, 키워드 배열은 null 처리
-        stat.updateReviewSummary(INSUFFICIENT_DATA_FLAG, null, null);
-        reviewStatRepository.save(stat);
-        log.info("[GenAI] Game ID: {} marked as INSUFFICIENT_DATA to prevent infinite requerying.", stat.getGame().getId());
-    }
+    private void recordFailedTask(Long targetId, GenaiFailReason reason) {
+        transactionTemplate.executeWithoutResult(status -> {
+            GenaiFailedTask failedTask = GenaiFailedTask.builder()
+                    .pipelineType(GenaiPipelineType.STEAM_REVIEW_SUMMARY)
+                    .targetId(targetId)
+                    .failReason(reason)
+                    .build();
 
-    /**
-     * 구글 안전 필터 차단 등의 문제로 요약에 실패한 게임 스킵 마킹 (무한 재조회 방지)
-     */
-    public void markAsSummaryFailed(ReviewStat stat) {
-        stat.updateReviewSummary(SUMMARY_FAILED_FLAG, null, null);
-        reviewStatRepository.save(stat);
-        log.info("[GenAI] Game ID: {} marked as SUMMARY_FAILED to prevent infinite requerying.", stat.getGame().getId());
+            failedTaskRepository.save(failedTask);
+        });
     }
 }

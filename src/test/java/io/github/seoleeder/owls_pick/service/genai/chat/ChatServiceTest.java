@@ -108,6 +108,47 @@ public class ChatServiceTest {
     }
 
     @Test
+    @DisplayName("유저 발화문이 공백일 경우 분산 락 점유 전 예외 발생 확인")
+    void processRagChat_EmptyMessage_ThrowException() {
+        // [Given] 공백 문자열이 포함된 유저 요청 세팅
+        ChatRequest request = new ChatRequest(null, "   ");
+
+        // [When & Then] 락 점유 로직 실행 전 INVALID_INPUT_VALUE 예외 발생 검증
+        assertThatThrownBy(() -> chatService.processRagChat(TEST_USER_ID, request))
+                .isInstanceOf(CustomException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.INVALID_INPUT_VALUE);
+
+        // [Then] 무의미한 요청에 대한 분산 락 로직 호출 차단 여부 확인
+        verify(chatTrafficService, never()).checkTrafficAndAcquireLock(anyLong());
+    }
+
+    @Test
+    @DisplayName("벡터 DB 검색 결과 0건 반환 시 예외 없이 빈 컨텍스트 전달 및 일반 답변 생성 확인")
+    void processRagChat_EmptySimilarGames_ReturnGeneralResponse() {
+        // [Given] 기존 세션 기반의 유저 요청 세팅
+        ChatRequest request = new ChatRequest(1L, "테스트 게임");
+        ChatSession mockSession = mock(ChatSession.class);
+        when(chatSessionRepository.findById(1L)).thenReturn(Optional.of(mockSession));
+
+        when(responseSpec.body(eq(QueryEmbeddingResponse.class))).thenReturn(new QueryEmbeddingResponse(new float[]{0.1f}));
+
+        // [Given] 벡터 DB 연관 게임 검색 실패(0건 반환) 상황 모킹
+        when(vectorEmbeddingRepository.findTopSimilarGames(any(), anyInt())).thenReturn(Collections.emptyList());
+
+        // [Given] 빈 컨텍스트 전달 시의 일반 답변 응답 모킹
+        RagGenerationResponse generalResponse = new RagGenerationResponse("관련 정보를 찾지 못했습니다.");
+        when(responseSpec.body(eq(RagGenerationResponse.class))).thenReturn(generalResponse);
+
+        // [When] RAG 메인 파이프라인 실행
+        ChatResponse response = chatService.processRagChat(TEST_USER_ID, request);
+
+        // [Then] 시스템 예외 발생 없이 일반 답변 반환 및 정상적인 락 해제 상태 검증
+        assertThat(response.reply()).isEqualTo("관련 정보를 찾지 못했습니다.");
+        verify(chatTrafficService, times(1)).releaseLock(TEST_USER_ID);
+    }
+
+    @Test
     @DisplayName("정상 RAG 파이프라인 처리 시 데이터 반환 및 분산 락 해제 상태 검증")
     void processRagChat_Success_ReturnResponseAndReleaseLock() {
         // [Given] 신규 세션 요청 및 유저 조회 모킹
