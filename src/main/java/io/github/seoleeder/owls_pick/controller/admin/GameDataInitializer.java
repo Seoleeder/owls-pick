@@ -1,10 +1,7 @@
 package io.github.seoleeder.owls_pick.controller.admin;
 
 import io.github.seoleeder.owls_pick.global.response.CommonResponse;
-import io.github.seoleeder.owls_pick.service.genai.ReviewSummaryService;
 import io.github.seoleeder.owls_pick.service.client.hltb.HltbSyncService;
-import io.github.seoleeder.owls_pick.service.genai.localization.KeywordLocalizationService;
-import io.github.seoleeder.owls_pick.service.genai.localization.LocalizationService;
 import io.github.seoleeder.owls_pick.service.client.igdb.IgdbSyncService;
 import io.github.seoleeder.owls_pick.service.client.itad.ItadSyncService;
 import io.github.seoleeder.owls_pick.service.client.steam.SteamAppSyncService;
@@ -39,9 +36,6 @@ public class GameDataInitializer {
     private final IgdbSyncService igdbService;
     private final ItadSyncService itadService;
     private final HltbSyncService hltbSyncService;
-    private final LocalizationService localizationService;
-    private final KeywordLocalizationService keywordLocalizationService;
-    private final ReviewSummaryService reviewSummaryService;
 
 
     @Operation(summary = "Steam 앱 리스트 초기화",
@@ -291,7 +285,7 @@ public class GameDataInitializer {
     }
 
     @Operation(summary = "전체 게임 데이터 구축",
-            description = "스팀 앱 리스트 수집  -> IGDB, ITAD, 스팀 리뷰 및 대시보드 데이터 병렬 수집-> 수집 완료 직후 한글화 엔진 자동 가동",
+            description = "스팀 앱 리스트 수집  -> IGDB, ITAD, 스팀 리뷰 및 대시보드 데이터 병렬 수집",
             parameters = {
                     @Parameter(name = "X-ADMIN-KEY", description = "관리자 키", required = true, in = ParameterIn.HEADER)
             }
@@ -333,30 +327,11 @@ public class GameDataInitializer {
                 log.info("Completed!");
 
                 // 2. Parallel Execution
-                // IGDB 데이터 초기화 및 한글화 파이프라인 연동
+                // IGDB 데이터 동기화
                 CompletableFuture<Void> futureIgdb = CompletableFuture.runAsync(() -> {
                     log.info("IGDB Sync Started");
                     igdbService.backfillAllGames();
                     log.info("IGDB Sync Finished");
-                }).thenRunAsync(() -> {
-
-                    // IGDB 메타데이터 수집이 완료되면 비동기로 대량 한글화 작업 시작
-
-                    // 게임 설명 및 스토리라인 파이프라인 가동 (단 한 줄로 축약됨)
-                    log.info("Starting Automatic Localization Pipeline after IGDB Sync...");
-                    try {
-                        localizationService.runPipeline();
-                    } catch (Exception e) {
-                        log.error("Automatic Localization Pipeline Failed", e);
-                    }
-
-                    // 키워드 한글화 파이프라인 가동
-                    log.info("Starting Automatic Keyword Localization Pipeline...");
-                    try {
-                        keywordLocalizationService.runPipeline();
-                    } catch (Exception e) {
-                        log.error("Automatic Keyword Localization Pipeline Failed", e);
-                    }
                 });
 
                 // ITAD 데이터 초기화 (ID 수집 -> 가격 정보 수집)
@@ -381,18 +356,11 @@ public class GameDataInitializer {
                     log.info("Steam Dashboard Sync Finished");
                 });
 
-                // 스팀 리뷰 데이터 초기화 -> 완료 후 리뷰 요약 연계
+                // 스팀 리뷰 데이터 초기화
                 CompletableFuture<Void> futureReview = CompletableFuture.runAsync(() -> {
                     log.info("Steam Review Sync Started");
                     steamReviewService.initAllReviews();
                     log.info("Steam Review Sync Finished");
-                }).thenRunAsync(() -> {
-                    log.info("Starting Automatic Review Summary Pipeline after Review Sync...");
-                    try {
-                        reviewSummaryService.runPipeline();
-                    } catch (Exception e) {
-                        log.error("Automatic Review Summary Pipeline Failed", e);
-                    }
                 });
 
                 // 모든 병렬 수집 작업이 다 완료될 때까지 대기
