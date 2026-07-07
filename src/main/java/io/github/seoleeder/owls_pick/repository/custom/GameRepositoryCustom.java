@@ -83,6 +83,6 @@ public interface GameRepositoryCustom {
 
     // --- 벡터 임베딩 ---
 
-    // 벡터 임베팅이 필요한 게임 조회
+    // 벡터 임베딩이 필요한 게임 조회
     List<EmbeddingSourceDto> findGamesForEmbedding(int dbFetchSize);
 }

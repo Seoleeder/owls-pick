@@ -4,9 +4,13 @@ import io.github.seoleeder.owls_pick.dto.request.KeywordLocalizationRequest;
 import io.github.seoleeder.owls_pick.dto.response.KeywordLocalizationBulkResponse;
 import io.github.seoleeder.owls_pick.entity.game.KeywordDictionary;
 import io.github.seoleeder.owls_pick.entity.game.Tag;
+import io.github.seoleeder.owls_pick.entity.genai.GenaiFailedTask;
+import io.github.seoleeder.owls_pick.entity.genai.enums.GenaiFailReason;
+import io.github.seoleeder.owls_pick.entity.genai.enums.GenaiPipelineType;
 import io.github.seoleeder.owls_pick.global.config.properties.GenaiProperties;
 import io.github.seoleeder.owls_pick.global.response.CustomException;
 import io.github.seoleeder.owls_pick.global.response.ErrorCode;
+import io.github.seoleeder.owls_pick.repository.GenaiFailedTaskRepository;
 import io.github.seoleeder.owls_pick.repository.KeywordDictionaryRepository;
 import io.github.seoleeder.owls_pick.repository.TagRepository;
 import lombok.extern.slf4j.Slf4j;
@@ -28,29 +32,31 @@ public class KeywordLocalizationService {
     private final KeywordDictionaryRepository dictionaryRepository;
     private final TagRepository tagRepository;
     private final RestClient localizationRestClient;
-    private final GenaiProperties genaiProperties;
+    private final GenaiProperties props;
     private final TransactionTemplate transactionTemplate;
+    private final GenaiFailedTaskRepository failedTaskRepository;
 
     public KeywordLocalizationService(
             KeywordDictionaryRepository dictionaryRepository,
             TagRepository tagRepository,
             @Qualifier("genaiRestClient") RestClient localizationRestClient,
-            GenaiProperties localizationProperties,
-            TransactionTemplate transactionTemplate) {
+            GenaiProperties props,
+            TransactionTemplate transactionTemplate,
+            GenaiFailedTaskRepository failedTaskRepository) {
 
         this.dictionaryRepository = dictionaryRepository;
         this.tagRepository = tagRepository;
         this.localizationRestClient = localizationRestClient;
-        this.genaiProperties = localizationProperties;
+        this.props = props;
         this.transactionTemplate = transactionTemplate;
-
+        this.failedTaskRepository = failedTaskRepository;
     }
 
     /**
      * 환경 변수에 설정된 기본 청크 사이즈를 사용하여 파이프라인 전체 실행
      */
     public int runPipeline() {
-        return runPipeline(genaiProperties.localization().chunkSize().keyword(), false);
+        return runPipeline(props.localization().chunkSize().keyword(), false);
     }
 
     /**
@@ -105,7 +111,7 @@ public class KeywordLocalizationService {
      * 환경 변수에 설정된 청크 사이즈를 사용하여 키워드 한글화 실행
      */
     public void processUnlocalizedKeywords() {
-        processUnlocalizedKeywords(genaiProperties.localization().chunkSize().keyword(), false);
+        processUnlocalizedKeywords(props.localization().chunkSize().keyword(), false);
     }
 
     /**
@@ -126,18 +132,24 @@ public class KeywordLocalizationService {
 
         for (int i = 0; i < unlocalizedEntities.size(); i += chunkSize) {
             List<KeywordDictionary> chunk = unlocalizedEntities.subList(i, Math.min(unlocalizedEntities.size(), i + chunkSize));
-            processLocalizationChunk(chunk);
 
-            totalProcessed += chunk.size();
+            try {
+                processLocalizationChunk(chunk);
+                totalProcessed += chunk.size();
+            } catch (Exception e) {
+                // 통신 장애 발생 시 청크 데이터를 실패 작업으로 기록하여 무한 루프 방지
+                log.error("Failed to process keyword localization chunk. Skipping to next chunk.", e);
+                recordFailedKeywords(chunk, GenaiFailReason.NETWORK_ERROR);
+                totalProcessed += chunk.size();
+            }
 
             if (isSingleRun) {
                 break;
             }
 
-            // API Rate Limit 방어를 위한 청크 간 딜레이
             if (i + chunkSize < unlocalizedEntities.size()) {
                 try {
-                    Thread.sleep(1000);
+                    Thread.sleep(props.localization().delayMs());
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     log.error("Keyword Localization Chunk processing interrupted", e);
@@ -159,11 +171,14 @@ public class KeywordLocalizationService {
         // 키워드 한글화 엔진 통신
         KeywordLocalizationBulkResponse response = sendToAiEngine(request);
 
-        // 결과 DB 반영 (트랜잭션 적용 구간)
+        // 결과 DB 반영
         transactionTemplate.executeWithoutResult(status -> {
-            applyLocalizationResults(chunkEntities, response);
-            // 트랜잭션 외부에서 로드된 엔티티이므로 명시적 업데이트 필수
-            dictionaryRepository.saveAll(chunkEntities);
+            // 영속 상태의 사전 엔티티 일괄 재조회
+            List<Long> ids = chunkEntities.stream().map(KeywordDictionary::getId).toList();
+            List<KeywordDictionary> managedEntities = dictionaryRepository.findAllById(ids);
+
+            // 번역 결과 매핑 및 상태 업데이트
+            applyLocalizationResults(managedEntities, response);
         });
     }
 
@@ -189,14 +204,15 @@ public class KeywordLocalizationService {
         // 대용량 Tag 엔티티 청크 단위 조회 및 처리 루프
         while (true) {
 
-            // 업데이트가 필요한 Tag 엔티티를 청크만큼 조회
-            List<Tag> targetTags = tagRepository.findTagsNeedingKeywordLocalization(chunkSize);
-            if (targetTags.isEmpty()) {
-                break; // 더 이상 업데이트할 태그가 없으면 종료
-            }
+            Integer mappedCount = transactionTemplate.execute(status -> {
 
-            // 영문 키워드를 한글 사전과 매핑하여 태그 업데이트
-            transactionTemplate.executeWithoutResult(status -> {
+                // 업데이트가 필요한 Tag 엔티티를 청크만큼 조회
+                List<Tag> targetTags = tagRepository.findTagsNeedingKeywordLocalization(chunkSize);
+                if (targetTags.isEmpty()) {
+                    return 0; // 더 이상 업데이트할 태그가 없으면 종료
+                }
+
+                // 영문 키워드를 한글 사전과 매핑하여 태그 업데이트
                 for (Tag tag : targetTags) {
                     List<String> localizedKeywords = tag.getKeywords().stream()
                             .map(eng -> dictionaryMap.getOrDefault(eng, eng))
@@ -204,13 +220,64 @@ public class KeywordLocalizationService {
 
                     tag.updateKeywordsKo(localizedKeywords);
                 }
+                return targetTags.size();
             });
 
-            totalMapped += targetTags.size();
-            log.info("Successfully applied translated keywords to {} tags. (Total: {})", targetTags.size(), totalMapped);
+            if (mappedCount == null || mappedCount == 0) {
+                break;
+            }
+
+            totalMapped += mappedCount;
+            log.info("Successfully applied translated keywords to {} tags. (Total: {})", mappedCount, totalMapped);
         }
 
         return totalMapped;
+    }
+
+    /**
+     * 키워드 한글화 실패 작업 재시도
+     */
+    public void retryFailedTasks() {
+        // 아직 조치되지 않은 키워드 실패 내역 조회
+        List<GenaiFailedTask> failedTasks = failedTaskRepository.findUnhandledTasks(GenaiPipelineType.KEYWORD_LOCALIZATION);
+        if (failedTasks.isEmpty()) {
+            return;
+        }
+
+        log.info("[GenAI] Retrying {} failed Keyword Localization tasks...", failedTasks.size());
+
+        // 사전에 정의된 청크 사이즈 할당
+        int chunkSize = props.localization().chunkSize().keyword();
+
+        // 대량 실패 건 방어를 위한 청크 단위 분할 처리
+        for (int i = 0; i < failedTasks.size(); i += chunkSize) {
+            List<GenaiFailedTask> taskChunk = failedTasks.subList(i, Math.min(failedTasks.size(), i + chunkSize));
+            List<Long> dictionaryIds = taskChunk.stream().map(GenaiFailedTask::getTargetId).toList();
+
+            try {
+                // 실패 대상 키워드 엔티티 조회
+                List<KeywordDictionary> targetKeywords = dictionaryRepository.findAllById(dictionaryIds);
+
+                // 통신 DTO 생성 및 키워드 한글화 재요청
+                KeywordLocalizationRequest request = buildRequestDto(targetKeywords);
+                KeywordLocalizationBulkResponse response = sendToAiEngine(request);
+
+                // 재시도 결과 적용 및 상태 갱신 트랜잭션 개방
+                transactionTemplate.executeWithoutResult(status -> {
+                    // 키워드 사전 엔티티 영속화 및 데이터 매핑
+                    List<KeywordDictionary> managedEntities = dictionaryRepository.findAllById(dictionaryIds);
+                    applyLocalizationResults(managedEntities, response);
+
+                    // 실패 작업 이력 영속화 및 조치 상태(isHandled) 변경
+                    List<Long> taskIds = taskChunk.stream().map(GenaiFailedTask::getId).toList();
+                    List<GenaiFailedTask> managedTasks = failedTaskRepository.findAllById(taskIds);
+                    managedTasks.forEach(GenaiFailedTask::markAsHandled);
+                });
+            } catch (Exception e) {
+                // 청크 단위 재시도 예외 격리
+                log.error("[GenAI] Failed to retry Keyword Localization chunk. Skipping to next chunk.", e);
+            }
+        }
     }
 
     // ---------------------------------------------------------------------------------
@@ -231,8 +298,8 @@ public class KeywordLocalizationService {
      * 한글화 엔진으로 HTTP 요청 전송 및 결과 반환
      */
     private KeywordLocalizationBulkResponse sendToAiEngine(KeywordLocalizationRequest request) {
-        URI targetUri = UriComponentsBuilder.fromUriString(genaiProperties.fastapiUrl())
-                .path("/api/localization/keywords")
+        URI targetUri = UriComponentsBuilder.fromUriString(props.fastapiUrl())
+                .path("/api/localization/keywords/bulk")
                 .build()
                 .toUri();
 
@@ -271,5 +338,22 @@ public class KeywordLocalizationService {
             }
         }
         log.info("Successfully localized {} keywords in current chunk.", successCount);
+    }
+
+    /**
+     * 추후 재시도 및 통계를 위한 실패 대상 식별자 및 실패 사유 적재
+     */
+    private void recordFailedKeywords(List<KeywordDictionary> chunkEntities, GenaiFailReason reason) {
+        transactionTemplate.executeWithoutResult(status -> {
+            List<GenaiFailedTask> failedTasks = chunkEntities.stream()
+                    .map(entity -> GenaiFailedTask.builder()
+                            .pipelineType(GenaiPipelineType.KEYWORD_LOCALIZATION)
+                            .targetId(entity.getId())
+                            .failReason(reason)
+                            .build())
+                    .toList();
+
+            failedTaskRepository.saveAll(failedTasks);
+        });
     }
 }
