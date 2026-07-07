@@ -1,10 +1,7 @@
 package io.github.seoleeder.owls_pick.scheduler;
 
-import io.github.seoleeder.owls_pick.service.genai.ReviewSummaryService;
 import io.github.seoleeder.owls_pick.service.client.hltb.HltbSyncService;
 import io.github.seoleeder.owls_pick.service.client.igdb.IgdbSyncService;
-import io.github.seoleeder.owls_pick.service.genai.localization.KeywordLocalizationService;
-import io.github.seoleeder.owls_pick.service.genai.localization.LocalizationService;
 import io.github.seoleeder.owls_pick.service.client.itad.ItadSyncService;
 import io.github.seoleeder.owls_pick.service.client.steam.SteamAppSyncService;
 import io.github.seoleeder.owls_pick.service.client.steam.SteamDashboardSyncService;
@@ -26,9 +23,6 @@ public class GameDataScheduler {
     private final HltbSyncService hltbSyncService;
     private final IgdbSyncService igdbService;
     private final ItadSyncService itadService;
-    private final LocalizationService localizationService;
-    private final KeywordLocalizationService keywordLocalizationService;
-    private final ReviewSummaryService reviewSummaryService;
 
     @Scheduled(cron = "0 0 0 * * *")
     public void scheduleDailyFullSync(){
@@ -49,57 +43,12 @@ public class GameDataScheduler {
 
             log.info("[Scheduler] Daily Full Sync Finished!");
 
-            // 4 HLTB PlaytimeData
+            // 4. HLTB PlaytimeData
             triggerAsyncHltbPipeline();
-
-            // 생성형 AI 파이프라인 실행 (한글화, 리뷰 요약)
-            triggerAsyncGenaiPipeline();
 
         } catch (Exception e) {
             log.error("[Scheduler] Daily Full Sync Failed", e);
         }
-    }
-
-    /**
-     * 일일 데이터 수집 직후 구동되는 비동기 한글화 파이프라인
-     */
-    private void triggerAsyncGenaiPipeline() {
-        // 별도의 비동기 스레드에서 실행
-        CompletableFuture.runAsync(() -> {
-            log.info("[Scheduler] Starting Daily Async Localization Pipeline...");
-
-            // 게임 설명 및 스토리라인 파이프라인 가동
-            try {
-                localizationService.runPipeline();
-            } catch (Exception e) {
-                // 게임 설명 한글화가 실패하더라도 키워드 한글화는 시도할 수 있도록 독립된 try-catch 적용
-                log.error("[Scheduler] Daily Game Description Localization Pipeline Failed", e);
-            }
-
-            // 키워드 한글화 파이프라인 가동
-            log.info("[Scheduler] Starting Daily Keyword Localization Pipeline...");
-            try {
-                keywordLocalizationService.runPipeline();
-            } catch (Exception e) {
-                log.error("[Scheduler] Daily Keyword Localization Pipeline Failed", e);
-            }
-
-            log.info("[Scheduler] All Daily Localization Pipelines Finished.");
-
-            // AI 리뷰 요약 파이프라인 (추가)
-            log.info("[Scheduler] Starting Daily AI Review Summary Pipeline...");
-            try {
-                reviewSummaryService.runPipeline();
-            } catch (Exception e) {
-                log.error("[Scheduler] Daily AI Review Summary Pipeline Failed", e);
-            }
-
-            log.info("[Scheduler] All Daily GenAI Pipelines Finished.");
-
-        }).exceptionally(ex -> {
-            log.error("[Scheduler] Daily Localization Pipeline Failed: {}", ex.getMessage());
-            return null;
-        });
     }
 
     /**
@@ -185,7 +134,4 @@ public class GameDataScheduler {
         steamDashboardService.syncScheduledYearly();
         log.info("[Scheduler] Yearly Top Game Sync Finished!");
     }
-
-
-
 }
