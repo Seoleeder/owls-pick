@@ -12,3 +12,5 @@ scrape_configs:
     metrics_path: '/metrics'  # 메트릭 엔드포인트
     static_configs:
       - targets: ['owls-pick-fastapi:8000']
+        labels:
+          application: 'owls-pick-fastapi'
