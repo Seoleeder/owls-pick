@@ -61,6 +61,8 @@ jobs:
           script: |
             cd ~/owls-pick
             
+            git pull origin main
+            
             docker pull ${{ secrets.DOCKERHUB_USERNAME }}/owls-pick-api:latest
             
             docker compose -f docker-compose.yaml -f docker-compose-prod.yaml up -d --force-recreate owls-pick-api
