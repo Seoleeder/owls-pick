@@ -3,6 +3,13 @@ services:
     environment:
       - SPRING_PROFILES_ACTIVE=prod
       - AWS_REGION=ap-northeast-2
+    # Spring Boot 서버 정상 구동 여부 검증
+    healthcheck:
+      test: [ "CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080/ || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s # JVM 초기화 및 애플리케이션 구동 시간 유예
     # Redis 캐시 서버가 완전히 구동된 이후에 API 서버를 실행하도록 순서 제어
     depends_on:
       redis:
@@ -28,6 +35,13 @@ services:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
       - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL}
+    # Grafana 정상 구동 여부 검증
+    healthcheck:
+      test: [ "CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     volumes:
       - grafana-data:/var/lib/grafana
 
@@ -51,10 +65,13 @@ services:
       # 발급이 완료된 Let's Encrypt SSL 인증서 키 파일들을 Nginx가 읽어오기 위한 경로 공유
       - ./certbot/conf:/etc/letsencrypt
     depends_on:
-      - owls-pick-api
-      - grafana
+      owls-pick-api:
+        condition: service_healthy
+      grafana:
+        condition: service_healthy
     networks:
       - owls-pick-network
+    restart: unless-stopped
 
 volumes:
   prometheus-data:
