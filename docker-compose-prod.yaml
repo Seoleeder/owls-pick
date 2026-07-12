@@ -3,6 +3,11 @@ services:
     environment:
       - SPRING_PROFILES_ACTIVE=prod
       - AWS_REGION=ap-northeast-2
+    # 컨테이너 메모리 초과로 인한 서버 멈춤 방지를 위한 최대 메모리 제한
+    deploy:
+      resources:
+        limits:
+          memory: 350M
     # Redis 캐시 서버가 완전히 구동된 이후에 API 서버를 실행하도록 순서 제어
     depends_on:
       redis:
@@ -19,6 +24,11 @@ services:
       - ./prometheus/prometheus.yaml:/etc/prometheus/prometheus.yml
       # 컨테이너 재시작 시에도 수집된 메트릭 데이터를 보존하기 위한 볼륨 매핑
       - prometheus-data:/prometheus
+    # 컨테이너 최대 메모리 제한
+    deploy:
+      resources:
+        limits:
+          memory: 150M
 
   grafana:
     ports:
@@ -30,6 +40,11 @@ services:
       - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL}
     volumes:
       - grafana-data:/var/lib/grafana
+    # 컨테이너 최대 메모리 제한
+    deploy:
+      resources:
+        limits:
+          memory: 100M
 
   loki:
     ports:
@@ -37,6 +52,11 @@ services:
     volumes:
       - ./loki/local-config.yaml:/etc/loki/local-config.yaml
       - loki-data:/loki
+    # 컨테이너 최대 메모리 제한
+    deploy:
+      resources:
+        limits:
+          memory: 150M
 
   nginx:
     image: nginx:alpine
