@@ -7,7 +7,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 350M
+          memory: 400M
     # Redis 캐시 서버가 완전히 구동된 이후에 API 서버를 실행하도록 순서 제어
     depends_on:
       redis:
@@ -44,7 +44,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 100M
+          memory: 200M
 
   loki:
     ports:
