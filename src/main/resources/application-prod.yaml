@@ -1,0 +1,113 @@
+spring:
+  config:
+    activate:
+      on-profile: prod
+    import: "aws-parameterstore:/owls-pick/prod/"
+
+  datasource:
+    url: ${db.url}
+    username: ${db.username}
+    password: ${db.password}
+  jpa:
+    properties:
+      hibernate:
+        format_sql: false
+
+  data:
+    redis:
+      host: ${config.redis-host:owls-pick-redis}
+      port: 6379
+
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${auth.google.client-id}
+            client-secret: ${auth.google.client-secret}
+            scope: [email, profile, openid]
+            redirect-uri: "${config.api-url}/api/auth/login/google"
+            authorization-grant-type: "authorization_code"
+            client-name: "google"
+          kakao:
+            client-id: ${auth.kakao.client-id}
+            client-secret: ${auth.kakao.client-secret}
+            scope: [profile_nickname, account_email, openid]
+            redirect-uri: "${config.api-url}/api/auth/login/kakao"
+            client-authentication-method: "client_secret_post"
+            authorization-grant-type: "authorization_code"
+            client-name: "kakao"
+          naver:
+            client-id: ${auth.naver.client-id}
+            client-secret: ${auth.naver.client-secret}
+            scope: [openid]
+            redirect-uri: "${config.api-url}/api/auth/login/naver"
+            authorization-grant-type: "authorization_code"
+            client-name: "naver"
+
+owls-pick:
+  admin-key: ${auth.admin-key}
+
+jwt:
+  secret: ${auth.jwt-secret}
+
+firebase:
+  config:
+    credentials-base64: ${auth.firebase-credentials}
+
+logging:
+  level:
+    root: info
+    org.hibernate.SQL: error
+    org.hibernate.type.descriptor.sql.BasicBinder: error
+
+external-api:
+  steam:
+    key: ${external-api.steam.web-api-key}
+  igdb:
+    client-id: ${external-api.igdb.client-id}
+    client-secret: ${external-api.igdb.client-secret}
+  itad:
+    key: ${external-api.itad.web-api-key}
+  hltb:
+    fastapi-url: "${config.fastapi-url:http://owls-pick-fastapi:8000}"
+    chunk-size: 30
+
+internal-api:
+  genai:
+    fastapi-url: "${config.fastapi-url:http://owls-pick-fastapi:8000}"
+    failed-task:
+      retention-days: 14
+    localization:
+      chunk-size:
+        game: 30
+        keyword: 200
+      delay-ms: 10000
+    review:
+      min-threshold: 50
+      batch-size: 10
+      delay-ms: 10000
+    embedding:
+      db-fetch-size: 1000
+      api-batch-size: 100
+      delay-ms: 8000
+    chat:
+      history-limit: 10
+      traffic:
+        prefix:
+          lock: "chat:lock:"
+          rate-limit: "chat:rate_limit:"
+        limit:
+          max-requests-per-minute: 5
+
+cors:
+  allowed-origins: ${config.cors-origins}
+  allowed-methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+  allowed-headers: ["*"]
+  exposed-headers: ["Authorization"]
+  allow-credentials: true
+  max-age: 3600
+
+springdoc:
+  swagger-ui:
+    enabled: false

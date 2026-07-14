@@ -1,0 +1,108 @@
+spring:
+  config:
+    activate:
+      on-profile: dev
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:5432/owls_pick?reWriteBatchedInserts=true
+    password: ${DATASOURCE_PASSWORD_LOCAL}
+  jpa:
+    properties:
+      hibernate:
+        format_sql: true
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: 6379
+
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID}
+            client-secret: ${GOOGLE_CLIENT_SECRET}
+            scope: [email, profile, openid]
+            redirect-uri: "http://localhost:8080/api/auth/login/google"
+            authorization-grant-type: "authorization_code"
+            client-name: "google"
+          kakao:
+            client-id: ${KAKAO_CLIENT_ID}
+            client-secret: ${KAKAO_CLIENT_SECRET}
+            scope: [profile_nickname, account_email, openid]
+            redirect-uri: "http://localhost:8080/api/auth/login/kakao"
+            client-authentication-method: "client_secret_post"
+            authorization-grant-type: "authorization_code"
+            client-name: "kakao"
+          naver:
+            client-id: ${NAVER_CLIENT_ID}
+            client-secret: ${NAVER_CLIENT_SECRET}
+            scope: [openid]
+            redirect-uri: "http://localhost:8080/api/auth/login/naver"
+            authorization-grant-type: "authorization_code"
+            client-name: "naver"
+
+logging:
+  level:
+    root: info
+    org.hibernate.SQL: warn
+    org.hibernate.type.descriptor.sql.BasicBinder: warn
+
+external-api:
+  hltb:
+    fastapi-url: "${FASTAPI_URL:http://localhost:8000}"
+    chunk-size: 30
+
+internal-api:
+  genai:
+    fastapi-url: "${FASTAPI_URL:http://localhost:8000}"
+    failed-task:
+      retention-days: 14
+    localization:
+      chunk-size:
+        game: 10
+        keyword: 100
+      delay-ms: 15000
+    review:
+      min-threshold: 50
+      batch-size: 5
+      delay-ms: 20000
+    embedding:
+      db-fetch-size: 500
+      api-batch-size: 50
+      delay-ms: 17000
+    chat:
+      history-limit: 10
+      traffic:
+        prefix:
+          lock: "chat:lock:"
+          rate-limit: "chat:rate_limit:"
+        limit:
+          max-requests-per-minute: 5
+
+cors:
+  allowed-origins:
+    - "http://localhost:3000"
+    - "http://localhost:8080"
+  allowed-methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+  allowed-headers: ["*"]
+  exposed-headers: ["Authorization"]
+  allow-credentials: true
+  max-age: 3600
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    title: OwlsPick API
+    operations-sorter: method
+    tags-sorter: alpha
+    display-request-duration: true
+    disable-swagger-default-url: true
+    doc-expansion: none
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "prometheus, health"
