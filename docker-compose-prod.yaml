@@ -7,7 +7,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 450M
+          memory: 500M
     # Redis 캐시 서버가 완전히 구동된 이후에 API 서버를 실행하도록 순서 제어
     depends_on:
       redis:
@@ -21,6 +21,13 @@ services:
       resources:
         limits:
           memory: 250M
+
+  redis:
+    # 컨테이너 최대 메모리 제한
+    deploy:
+      resources:
+        limits:
+          memory: 80M
 
   prometheus:
     ports:
