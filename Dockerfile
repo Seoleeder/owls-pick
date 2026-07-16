@@ -46,6 +46,8 @@ EXPOSE 8080
 # ZGC 적용 및 메모리 제한 설정을 포함한 애플리케이션 실행 명령어 정의
 ENTRYPOINT ["java", \
             "-Duser.timezone=Asia/Seoul", \
+            "-Dnetworkaddress.cache.ttl=5", \
+            "-Dsun.net.inetaddr.ttl=5", \
             "-XX:MaxRAMPercentage=75.0", \
             "-XX:+UseZGC", \
             "org.springframework.boot.loader.launch.JarLauncher"]
