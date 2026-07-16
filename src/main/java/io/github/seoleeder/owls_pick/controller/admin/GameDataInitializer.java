@@ -285,13 +285,13 @@ public class GameDataInitializer {
     }
 
     @Operation(summary = "전체 게임 데이터 구축",
-            description = "스팀 앱 리스트 수집  -> IGDB, ITAD, 스팀 리뷰 및 대시보드 데이터 병렬 수집",
+            description = "스팀 앱 리스트 수집  -> IGDB, ITAD, 스팀 리뷰 및 대시보드 데이터 순차 수집",
             parameters = {
                     @Parameter(name = "X-ADMIN-KEY", description = "관리자 키", required = true, in = ParameterIn.HEADER)
             }
     )
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "전체 게임 데이터 병렬 수집 백그라운드 작업 시작 성공",
+            @ApiResponse(responseCode = "200", description = "전체 게임 데이터 순차 수집 백그라운드 작업 시작 성공",
                     content = @Content(mediaType = "application/json",
                             examples = @ExampleObject(value = """
                                     {
@@ -321,56 +321,43 @@ public class GameDataInitializer {
             long startTime = System.currentTimeMillis();
             try {
 
-                // 1. Steam App List (Blocking)
-                log.info("Steam App List Sync Started");
+                // 1. Steam App List Sync
+                log.info("[Step 1/6] Steam App List Sync Started");
                 steamAppService.syncAppList();
-                log.info("Completed!");
+                log.info("[Step 1/6] Steam App List Sync Completed");
 
-                // 2. Parallel Execution
-                // IGDB 데이터 동기화
-                CompletableFuture<Void> futureIgdb = CompletableFuture.runAsync(() -> {
-                    log.info("IGDB Sync Started");
-                    igdbService.backfillAllGames();
-                    log.info("IGDB Sync Finished");
-                });
+                // 2. IGDB Metadata Sync
+                log.info("[Step 2/6] IGDB Metadata Sync Started");
+                igdbService.backfillAllGames();
+                log.info("[Step 2/6] IGDB Metadata Sync Completed");
 
-                // ITAD 데이터 초기화 (ID 수집 -> 가격 정보 수집)
-                CompletableFuture<Void> futureItad = CompletableFuture.runAsync(() -> {
-                    log.info("ITAD ID Sync Started");
-                    itadService.syncMissingItadIds();
+                // 3. ITAD Sync (ID 수집 -> 가격 정보 수집)
+                log.info("[Step 3/6] ITAD ID & Price Sync Started");
+                itadService.syncMissingItadIds();
+                itadService.syncPrices();
+                log.info("[Step 3/6] ITAD Sync Completed");
 
-                    log.info("ITAD Price Sync Started");
-                    itadService.syncPrices();
+                // 4. Steam Dashboard Sync (과거 차트 -> 실시간 동접자/최다 플레이 수집)
+                log.info("[Step 4/6] Steam Dashboard Sync Started");
+                steamDashboardService.syncHistoricalDashboards();
+                steamDashboardService.syncRealTimeData();
+                log.info("[Step 4/6] Steam Dashboard Sync Completed");
 
-                    log.info("ITAD ID & Price Sync Finished");
-                });
+                // 5. Steam Review Sync (적응형 샘플링 리뷰 적재)
+                log.info("[Step 5/6] Steam Review Sync Started");
+                steamReviewService.initAllReviews();
+                log.info("[Step 5/6] Steam Review Sync Completed");
 
-                // 스팀 대시보드 데이터 초기화
-                CompletableFuture<Void> futureDashboard = CompletableFuture.runAsync(() -> {
-                    log.info("Steam Weekly, Monthly, Yearly Dashboard Sync Started");
-                    steamDashboardService.syncHistoricalDashboards();
-
-                    log.info("Steam RealTime Dashboard Sync Started");
-                    steamDashboardService.syncRealTimeData();
-
-                    log.info("Steam Dashboard Sync Finished");
-                });
-
-                // 스팀 리뷰 데이터 초기화
-                CompletableFuture<Void> futureReview = CompletableFuture.runAsync(() -> {
-                    log.info("Steam Review Sync Started");
-                    steamReviewService.initAllReviews();
-                    log.info("Steam Review Sync Finished");
-                });
-
-                // 모든 병렬 수집 작업이 다 완료될 때까지 대기
-                CompletableFuture.allOf(futureIgdb, futureItad, futureDashboard, futureReview).join();
+                // 6. HLTB Playtime Sync (플레이타임 동기화)
+                log.info("[Step 6/6] HLTB Playtime Sync Started");
+                hltbSyncService.runSyncPipeline();
+                log.info("[Step 6/6] HLTB Playtime Sync Completed");
 
                 long endTime = System.currentTimeMillis();
                 log.info("[Admin] All Initialization Finished! (Duration: {}ms)", (endTime - startTime));
 
             } catch (Exception e) {
-                log.error("[Admin] Critical Error", e);
+                log.error("[Admin] Critical Error occurred during sequential initialization pipeline", e);
             }
         });
 

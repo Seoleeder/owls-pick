@@ -84,6 +84,8 @@ external-api:
 
 owls-pick:
   admin-key: ${INITIALIZATION_ADMIN_KEY}
+  scheduler:
+    enabled: true  # 스케줄러 활성화 여부 기본값
   curation:
     upcoming:
       min-hypes: 5

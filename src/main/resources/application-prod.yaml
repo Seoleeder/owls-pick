@@ -47,6 +47,8 @@ spring:
 
 owls-pick:
   admin-key: ${auth.admin-key}
+  scheduler:
+    enabled: ${config.scheduler-enabled}
 
 jwt:
   secret: ${auth.jwt-secret}
