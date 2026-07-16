@@ -1,6 +1,5 @@
 package io.github.seoleeder.owls_pick.global.config.properties;
 
-
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "internal-api.genai")
