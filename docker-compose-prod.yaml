@@ -7,7 +7,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 400M
+          memory: 450M
     # Redis 캐시 서버가 완전히 구동된 이후에 API 서버를 실행하도록 순서 제어
     depends_on:
       redis:
@@ -16,6 +16,11 @@ services:
   owls-pick-fastapi:
     environment:
       - APP_ENV=prod
+    # 컨테이너 최대 메모리 제한
+    deploy:
+      resources:
+        limits:
+          memory: 250M
 
   prometheus:
     ports:
@@ -28,7 +33,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 150M
+          memory: 80M
 
   grafana:
     ports:
@@ -56,7 +61,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 150M
+          memory: 80M
 
   nginx:
     image: nginx:alpine
@@ -76,6 +81,11 @@ services:
     networks:
       - owls-pick-network
     restart: unless-stopped
+    # 컨테이너 최대 메모리 제한
+    deploy:
+      resources:
+        limits:
+          memory: 80M
 
 volumes:
   prometheus-data:
