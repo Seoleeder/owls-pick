@@ -27,11 +27,11 @@ public class GameDataScheduler {
     private final SchedulerProperties schedulerProperties;
 
     /**
-     * 스케줄러 실행 활성화 여부 검증
+     * 스케줄러 실행 비활성화 여부 검증
      */
-    private boolean isSchedulerEnabled() {
+    private boolean isSchedulerDisabled() {
         if (!schedulerProperties.enabled()) {
-            log.warn("[Scheduler] Execution disabled by configuration (owls-pick.scheduler.enabled=false). Skipping job.");
+            log.warn("[Scheduler] Scheduled task skipped: background execution is currently disabled.");
             return true;
         }
         return false;
@@ -39,7 +39,7 @@ public class GameDataScheduler {
 
     @Scheduled(cron = "0 0 0 * * *")
     public void scheduleDailyFullSync(){
-        if (isSchedulerEnabled()) return;
+        if (isSchedulerDisabled()) return;
         log.debug("[Scheduler] Daily Full Sync Started");
 
         try {
@@ -81,7 +81,7 @@ public class GameDataScheduler {
 
     @Scheduled(cron = "0 0 0,6,12,18 * * *")
     public void schedulePriceSync() {
-        if (isSchedulerEnabled()) return;
+        if (isSchedulerDisabled()) return;
         log.debug("[Scheduler] 6-Hour Price Sync Started");
         try {
             itadService.syncMissingItadIds();
@@ -99,7 +99,7 @@ public class GameDataScheduler {
      * */
     @Scheduled(cron = "0 0/15 * * * *")
     public void scheduleConcurrentPlayers(){
-        if (isSchedulerEnabled()) return;
+        if (isSchedulerDisabled()) return;
         log.debug("[Scheduler] 15-min Concurrent Players Sync Started");
         steamDashboardService.syncConcurrentPlayers();
         log.info("[Scheduler] 15-min Concurrent Players Finished!");
@@ -111,7 +111,7 @@ public class GameDataScheduler {
      * */
     @Scheduled(cron =  "0 0 * * * *")
     public void scheduleMostPlayed(){
-        if (isSchedulerEnabled()) return;
+        if (isSchedulerDisabled()) return;
         log.debug("[Scheduler] Most Played (24h) Sync Started");
         steamDashboardService.syncMostPlayed();
         log.info("[Scheduler] Most Played Sync Finished!");
@@ -125,7 +125,7 @@ public class GameDataScheduler {
      */
     @Scheduled(cron = "0 0 18 * * TUE")
     public void scheduleWeeklyTopSellers(){
-        if (isSchedulerEnabled()) return;
+        if (isSchedulerDisabled()) return;
         log.debug("[Scheduler] Weekly Top Seller Game Sync Started (Tue 18:00 KST)");
         steamDashboardService.syncScheduledWeekly();
         log.info("[Scheduler] Weekly Top Seller Game Sync Finished!");
@@ -137,7 +137,7 @@ public class GameDataScheduler {
      */
     @Scheduled(cron = "0 0 3 16 * *")
     public void scheduleMonthlyTopApp(){
-        if (isSchedulerEnabled()) return;
+        if (isSchedulerDisabled()) return;
         log.debug("[Scheduler] Monthly Top Game Sync Started (16th 03:00 KST)");
         steamDashboardService.syncScheduledMonthly();
         log.info("[Scheduler] Monthly Top Game Sync Finished!");
@@ -149,7 +149,7 @@ public class GameDataScheduler {
      */
     @Scheduled(cron = "0 0 18 15 1 *")
     public void scheduleYearlyTopApp(){
-        if (isSchedulerEnabled()) return;
+        if (isSchedulerDisabled()) return;
         log.debug("[Scheduler] Yearly Top Game Sync Started (Jan 15th 18:00 KST)");
         steamDashboardService.syncScheduledYearly();
         log.info("[Scheduler] Yearly Top Game Sync Finished!");
