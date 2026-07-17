@@ -3,7 +3,6 @@ services:
     environment:
       - SPRING_PROFILES_ACTIVE=prod
       - AWS_REGION=ap-northeast-2
-      - OWLS_PICK_SCHEDULER_ENABLED=false
     # 컨테이너 메모리 초과로 인한 서버 멈춤 방지를 위한 최대 메모리 제한
     deploy:
       resources:
