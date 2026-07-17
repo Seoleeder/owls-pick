@@ -7,6 +7,7 @@ import io.github.seoleeder.owls_pick.service.client.itad.ItadSyncService;
 import io.github.seoleeder.owls_pick.service.client.steam.SteamAppSyncService;
 import io.github.seoleeder.owls_pick.service.client.steam.SteamDashboardSyncService;
 import io.github.seoleeder.owls_pick.service.client.steam.SteamReviewSyncService;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -25,6 +26,14 @@ public class GameDataScheduler {
     private final IgdbSyncService igdbService;
     private final ItadSyncService itadService;
     private final SchedulerProperties schedulerProperties;
+
+    /**
+     * 컨테이너 구동 시 스케줄러 활성화 설정 주입 여부 검증
+     */
+    @PostConstruct
+    public void init() {
+        log.warn("[Scheduler Config] owls-pick.scheduler.enabled: {}", schedulerProperties.enabled());
+    }
 
     /**
      * 스케줄러 실행 비활성화 여부 검증
