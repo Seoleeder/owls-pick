@@ -10,7 +10,8 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import org.springframework.web.servlet.NoHandlerFoundException;
 
 @Slf4j
-@RestControllerAdvice
+// Actuator 모니터링 충돌 방지를 위해 비즈니스 API 컨트롤러 한정
+@RestControllerAdvice(basePackages = "io.github.seoleeder.owls_pick.controller")
 public class GlobalExceptionHandler {
     // 존재하지 않는 요청에 대한 예외
     @ExceptionHandler(value = {NoHandlerFoundException.class, HttpRequestMethodNotSupportedException.class})

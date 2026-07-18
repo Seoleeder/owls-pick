@@ -22,6 +22,7 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.*;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -199,19 +200,34 @@ public class ItadSyncService {
         AtomicInteger completedBatches = new AtomicInteger(0);
         AtomicInteger totalUpdatedDetails = new AtomicInteger(0);
 
+        // 동시 실행 수 제한
+        int concurrencyLimit = (props.syncThreadPoolSize() > 0) ? props.syncThreadPoolSize() : 15;
+        Semaphore semaphore = new Semaphore(concurrencyLimit);
+
         // 분할된 배치 리스트를 가상 스레드 풀에 할당하여 병렬 API 수집 진행
         List<CompletableFuture<Void>> futures = partitions.stream()
                 .map(batchGames -> CompletableFuture.runAsync(() -> {
-                    // 가격 데이터 수집 후 업데이트된 개수 반환
-                    int updatedCount = processPriceBatchSafe(batchGames);
+                    try {
+                        // 동시 DB 트랜잭션 진입 수 제한
+                        semaphore.acquire();
+                        try {
+                            // 가격 데이터 수집 후 업데이트된 개수 반환
+                            int updatedCount = processPriceBatchSafe(batchGames);
 
-                    // 카운트 증가
-                    int currentBatch = completedBatches.incrementAndGet();
-                    totalUpdatedDetails.addAndGet(updatedCount);
+                            // 카운트 증가
+                            int currentBatch = completedBatches.incrementAndGet();
+                            totalUpdatedDetails.addAndGet(updatedCount);
 
-                    // 실시간 로깅
-                    log.debug("[ITAD Price Sync] Batch {}/{} completed. (Details updated: {})",
-                            currentBatch, totalBatches, updatedCount);
+                            // 실시간 로깅
+                            log.debug("[ITAD Price Sync] Batch {}/{} completed. (Details updated: {})",
+                                    currentBatch, totalBatches, updatedCount);
+                        } finally {
+                            // 작업 완료 시 권한 반환
+                            semaphore.release();
+                        }
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
                 }, taskExecutor))
                 .toList();
 
