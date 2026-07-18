@@ -80,7 +80,7 @@ external-api:
     key: ${ITAD_WEB_API_KEY}
     base-url: "api.isthereanydeal.com"
     batch-size: 200
-    sync-thread-pool-size: 15
+    sync-thread-pool-size: 30
 
 owls-pick:
   admin-key: ${INITIALIZATION_ADMIN_KEY}
