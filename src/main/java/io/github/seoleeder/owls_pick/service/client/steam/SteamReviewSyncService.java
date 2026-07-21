@@ -38,8 +38,8 @@ public class SteamReviewSyncService {
     private final ReviewRepository reviewRepository;
     private final GameRepository gameRepository;
 
-    private final AsyncTaskExecutor taskExecutor;   // Trace ID 전파용 실행기
-    private final TransactionTemplate transactionTemplate; // 트랜잭션 수동 제어용
+    private final AsyncTaskExecutor taskExecutor;
+    private final TransactionTemplate transactionTemplate;
 
     private final SteamProperties steamProps;
     private final CurationProperties curationProps;
@@ -68,12 +68,17 @@ public class SteamReviewSyncService {
     }
 
     /**
+     * 비동기 스레드 처리 후 적재 결과 데이터를 반환하는 내부 DTO.
+     */
+    private record ReviewBatchResult(int validGames, int savedReviews) {}
+
+    /**
      * 스팀 리뷰 데이터 정기 업데이트 메서드
-     * 이미 수집된 게임들 중, 리뷰 갱신이 오래된 순서대로 업데이트
+     * 갱신일이 오래된 게임들을 조회하고 최신 내역으로 업데이트.
      * */
     public void syncReviews(){
 
-        //리뷰 갱신이 필요한 스팀 게임 ID 조회
+        // 리뷰 갱신이 필요한 스팀 게임 ID 조회
         List<StoreDetail> targetGames = storeDetailRepository.findGamesNeedingReviewUpdate(StoreDetail.StoreName.STEAM, steamProps.review().maintenanceBatchSize());
 
         if (targetGames.isEmpty()) {
@@ -83,75 +88,80 @@ public class SteamReviewSyncService {
 
         log.info("Scheduled Sync: Processing {} games in Parallel...", targetGames.size());
 
-        // 대상 게임들에 대한 병렬 작업 수행
+        // 대상 게임 목록 비동기 병렬 처리
         processBatchAsync(targetGames);
 
         log.info("Scheduled Sync Finished. Processed {} games.", targetGames.size());
     }
 
     /**
-     * 게임 리뷰 데이터 초기 대량 수집 메서드
-     * 1. 리뷰 통계 데이터가 존재하지 않는 스팀 ID 조회
-     * 2. 스레드 내에서 각각의 스팀 ID에 대해서 비동기 작업 수행
-     * 3. 배치 작업이 전부 끝날때까지 Blocking
+     * 스팀 리뷰 데이터 초기 대량 수집 메서드
      * */
     public void initAllReviews(){
         log.info("Starting Bulk Initialization...");
-        int totalProcessed = 0;
+        int totalProcessedGames = 0;
+        int totalValidGames = 0;
+        int totalSavedReviews = 0;
 
         while (true) {
-            // ReviewStat이 존재하지 않는 스팀 게임 ID 조회
+            // ReviewStat 미보유 게임의 스팀 앱 ID 조회
             List<StoreDetail> targetGames = storeDetailRepository.findGamesWithNoReviews(
                     StoreDetail.StoreName.STEAM,
                     steamProps.review().initBatchSize()
             );
 
             if (targetGames.isEmpty()) {
-                log.info("Initialization Complete! Total: {}", totalProcessed);
+                log.info("Initialization Complete! Processed Games: {}, Valid Games: {}, Total Reviews: {}",
+                        totalProcessedGames, totalValidGames, totalSavedReviews);
                 break;
             }
 
-            processBatchAsync(targetGames);
+            // 배치 병렬 처리 수행 후 유효 게임 수와 저장된 리뷰 수 반환
+            ReviewBatchResult batchResult = processBatchAsync(targetGames);
 
-            totalProcessed += targetGames.size();
-            log.info("Bulk Progress: {} games processed...", totalProcessed);
+            totalProcessedGames += targetGames.size();
+            totalValidGames += batchResult.validGames();
+            totalSavedReviews += batchResult.savedReviews();
 
+            // 1,000개 게임 조회 단위로 누적 처리량과 평균 적재량 로깅
+            if (totalProcessedGames % 1000 == 0) {
+                int avgReviews = totalValidGames > 0 ? (totalSavedReviews / totalValidGames) : 0;
+                log.info("[Steam Review Bulk Progress] Processed: {} games. Valid: {}, Reviews: {} (Avg: {}/valid game)",
+                        totalProcessedGames, totalValidGames, totalSavedReviews, avgReviews);
+            }
         }
     }
 
     /**
-     * 대상 게임 리스트의 리뷰 수집 및 영속화 작업을 비동기 병렬 처리하는 공통 메서드.
+     * 대상 게임 리스트의 리뷰 수집 및 영속화 작업을 비동기 병렬 처리하는 메서드.
      */
-    private void processBatchAsync(List<StoreDetail> targetGames) {
-        AtomicInteger completedCount = new AtomicInteger(0);
+    private ReviewBatchResult processBatchAsync(List<StoreDetail> targetGames) {
+        AtomicInteger validGamesCount = new AtomicInteger(0);
         AtomicInteger totalSavedReviews = new AtomicInteger(0);
-        int totalTarget = targetGames.size();
 
-        // futures : 비동기 작업의 결과물(작업 완료 상태)들을 모아둘 리스트
-        // runAsync : 각각의 스팀 ID에 대해서 비동기 작업 수행
-        // taskExecutor: 부모 스레드의 MDC(Trace ID) 상태를 캡처하여 신규 스레드로 전파
+        // 리뷰 수집 대상 게임의 개별 비동기 스레드 생성
         List<CompletableFuture<Void>> futures = targetGames.stream()
                 .map(detail -> CompletableFuture.runAsync(() -> {
-                    // 리뷰 수집 및 저장 후, 새로 저장된 리뷰 개수 반환
+                    // 리뷰 수집 및 저장 후, 새로 저장된 리뷰 수 반환
                     int savedCount = processGameReviewSyncSafe(detail);
 
-                    // 스레드 안전하게 카운트 증가
-                    int currentCompleted = completedCount.incrementAndGet();
-                    totalSavedReviews.addAndGet(savedCount);
+                    // 유효 저장 발생 시 집계 데이터 반영
+                    if (savedCount > 0) {
+                        validGamesCount.incrementAndGet();
+                        totalSavedReviews.addAndGet(savedCount);
+                    }
 
                     // 실시간 진행 상황 로깅
-                    log.debug("[Steam Review] Game {}/{} processed. (New reviews saved: {})",
-                            currentCompleted, totalTarget, savedCount);
+                    log.debug("[Steam Review] Game {} processed. (New reviews saved: {})",
+                            detail.getGame().getTitle(), savedCount);
                 }, taskExecutor))
                 .toList();
 
-        // 여러 메모리에 흩어져 있는 각각의 비동기 작업의 상태를 하나로 묶어서 통합 관리
-        // toArray(new CompletableFuture[0]) 리스트를 배열로 바꿔서 allOf에 전달
-        // allOf() : 모든 작업이 완료 상태가 될때까지 관리하는 통합 Future를 생성
-        // join() : 해당 배치 작업이 전부 완료될 때까지 대기 (Blocking), 예외 발생시 RuntimeException 던짐.
+        // 파생된 전체 비동기 스레드 작업 완료 대기
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
-        log.info("Batch Process Completed. Total new reviews saved across all threads: {}", totalSavedReviews.get());
+        // 수집 결과 DTO 반환
+        return new ReviewBatchResult(validGamesCount.get(), totalSavedReviews.get());
     }
 
     /**
@@ -173,9 +183,9 @@ public class SteamReviewSyncService {
                 return 0;
             }
 
-            // TransactionTemplate로 내부 트랜잭션 생성 후 리뷰 데이터 저장
+            // 내부 트랜잭션 생성 후 스팀 리뷰 데이터 저장
             Integer savedCount = transactionTemplate.execute(status -> {
-                // 현재 트랜잭션의 영속성 컨텍스트에서 관리되는 Game 엔티티(Proxy) 확보
+                // Game 엔티티 프록시 참조 생성
                 Game managedGame = gameRepository.getReferenceById(detail.getGame().getId());
                 return saveReviewData(managedGame, response);
             });
@@ -187,7 +197,7 @@ public class SteamReviewSyncService {
             return finalCount;
 
         } catch (DataAccessException e) {
-            // DB 오류: 제약조건 위반, 커넥션 문제 등 -> 에러 로그 남기고 스킵
+            // 트랜잭션 롤백 및 예외 로깅 처리
             log.error("DB Failure for Game: {} ({}) - {}", gameTitle, appIdStr, e.getMessage());
 
         } catch (Exception e) {
@@ -204,7 +214,7 @@ public class SteamReviewSyncService {
      * @param response 해당 게임에 대한 리뷰 데이터
      */
     private int saveReviewData(Game game, SteamReviewResponse response) {
-        // 리뷰 통계 저장
+        // 리뷰 통계 엔티티 상태 갱신
         saveReviewStat(game, response.stats());
 
         int savedReviewCount = 0;
@@ -224,9 +234,7 @@ public class SteamReviewSyncService {
         return savedReviewCount;
     }
 
-    /** 스팀 리뷰 통계 데이터 저장 메서드
-     *  1. 데이터가 존재하면 새로 조회한 데이터로 업데이트
-     *  2. 존재하지 않으면 객체 생성 후 저장
+    /** 스팀 리뷰 통계 데이터 Upsert 메서드
      * @param game 리뷰 통계 데이터를 저장하거나 업데이트할 게임
      * @param stats 해당 게임에 대한 리뷰 통계 데이터
      * */
@@ -261,18 +269,18 @@ public class SteamReviewSyncService {
      * @param reviews 해당 게임에 대한 리뷰 상세 데이터
      * */
     private int saveReviews(Game game, List<SteamReviewDetail> reviews) {
-        // 해당 게임의 기존 리뷰 ID 목록 로드
+        // 해당 게임의 기존 리뷰 ID 목록 조회
         Set<Long> existingIds = reviewRepository.findRecommendationIdsByGameId(game.getId());
 
         List<Review> reviewsToSave = new ArrayList<>();
 
         for (SteamReviewDetail reviewDetail : reviews) {
-            // 중복 리뷰 필터링
+            // 중복 데이터 제외 처리
             if (existingIds.contains(reviewDetail.recommendationId())) {
                 continue;
             }
 
-            // PostgreSQL Null Byte(\u0000) 에러 방지용 문자열 정제
+            // 문자열 제약 위반 방지용 Null Byte 치환
             String safeReviewText = reviewDetail.reviewText() != null ?
                     reviewDetail.reviewText().replace("\u0000", "") : "";
 
