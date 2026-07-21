@@ -273,6 +273,20 @@ public class ItadSyncService {
         Map<String, List<Game>> itadIdToGamesMap = games.stream()
                 .collect(Collectors.groupingBy(Game::getItadId));
 
+        // 배치 단위 일괄 조회를 위한 전체 스토어 목록 수집
+        List<StoreName> allStoreNames = Arrays.asList(StoreName.values());
+
+        // 대상 게임들과 전체 스토어 조건에 해당하는 기존 StoreDetail 일괄 조회
+        List<StoreDetail> existingDetails = storeDetailRepository.findByGameInAndStoreNameIn(games, allStoreNames);
+
+        // 메모리 상의 빠른 객체 식별을 위한 Map 생성 (Key: "gameId:storeName")
+        Map<String, StoreDetail> detailMap = existingDetails.stream()
+                .collect(Collectors.toMap(
+                        sd -> sd.getGame().getId() + ":" + sd.getStoreName().name(),
+                        sd -> sd,
+                        (existing, replacement) -> existing
+                ));
+
         // 저장할 스토어 상세 정보 리스트
         List<StoreDetail> detailsToSave = new ArrayList<>();
 
@@ -311,14 +325,14 @@ public class ItadSyncService {
                 StoreName storeName = itadStore.getStoreName();
 
                 // 스토어 상세 정보 Upsert 조회
-                StoreDetail storeDetail = storeDetailRepository.findByGameAndStoreName(game, storeName)
-                        .orElseGet(() -> {
-                                return StoreDetail.builder()
+                String lookupKey = game.getId() + ":" + storeName.name();
+                StoreDetail storeDetail = detailMap.computeIfAbsent(lookupKey, k ->
+                        StoreDetail.builder()
                                 .game(game)
                                 .storeName(storeName)
                                 .storeAppId(null)
-                                .build();
-                        });
+                                .build()
+                );
 
                 // URL 정보 매핑
                 // - Steam: 기존 스팀 상점 고유 URL이 있다면 덮어쓰지 않고 유지
