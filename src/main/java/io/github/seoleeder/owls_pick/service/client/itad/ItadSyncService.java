@@ -64,20 +64,19 @@ public class ItadSyncService {
 
 
     /**
-     * Steam ID로 ITAD UUID 조회 & 저장
-     * (ITAD ID가 없는 게임들에 대해 수행)
+     * DB에 저장된 Steam 게임 중 ITAD ID가 누락된 게임에 대해 UUID 매핑 수행.
      */
     public void syncMissingItadIds() {
         log.info("Starting ITAD ID Sync (Filling missing IDs)...");
         int totalUpdated = 0;
         int totalAttempted = 0;
-        Long lastId = 0L; //커서 기반 페이징
+        Long lastId = 0L;
 
         int steamShopId = ItadStore.STEAM.getItadId();
 
         while (true) {
             try {
-                // 커서(lastId) 기준으로 지정된 배치 사이즈만큼 타겟 데이터 조회
+                // 커서 기준 ITAD ID 누락 게임 데이터 목록 조회
                 List<StoreDetail> targetDetails = storeDetailRepository.findValidGamesMissingItadId(
                         StoreName.STEAM,
                         lastId,
@@ -86,13 +85,13 @@ public class ItadSyncService {
 
                 if (targetDetails.isEmpty()) {
                     log.info("No more games missing ITAD IDs.");
-                    break;  // 처리할 데이터가 없으면 배치 종료
+                    break;
                 }
 
-                // 다음 배치 조회를 위해 현재 배치의 마지막 PK 값으로 커서 갱신
+                // 다음 조회를 위한 커서 갱신
                 lastId = targetDetails.get(targetDetails.size() - 1).getId();
 
-                // Steam AppID 추출 및 매핑 준비
+                // Steam App ID 추출 및 Game 엔티티 매핑 데이터 생성
                 Map<String, Game> steamIdToGameMap = targetDetails.stream()
                         .collect(Collectors.toMap(
                                 StoreDetail::getStoreAppId,
@@ -100,7 +99,7 @@ public class ItadSyncService {
                                 (existing, replacement) -> existing
                         ));
 
-                // ITAD Bulk API 규격("app/{steamId}")에 맞게 요청 파라미터 리스트 포맷팅
+                // ITAD Bulk API 규격에 맞추어 변환
                 List<String> formattedSteamIds = steamIdToGameMap.keySet().stream()
                         .map(id -> "app/" + id)
                         .toList();
@@ -108,14 +107,13 @@ public class ItadSyncService {
                 log.debug(">> ITAD API Request: Fetching UUIDs for {} games...", formattedSteamIds.size());
                 long start = System.currentTimeMillis();
 
-                // ITAD ID 수집 API 호출
-                // 대량의 스팀 ID로 ITAD ID 조회
+                // ITAD ID 매핑 API 호출 (스팀 ID로 ITAD UUID 조회)
                 ItadBulkResponse bulkResponse = collector.collectItadIdsBulk(steamShopId, formattedSteamIds);
 
                 long duration = System.currentTimeMillis() - start;
                 log.debug("<< ITAD API Response: Received matches. (Duration: {}ms)", duration);
 
-                // DB 업데이트 로직 호출 (transactionTemplate으로 내부 트랜잭션 적용)
+                // 내부 트랜잭션을 생성하여 ITAD UUID 업데이트
                 Integer batchUpdated = transactionTemplate.execute(status -> updateItadIds(steamIdToGameMap, bulkResponse));
 
                 if(batchUpdated != null) {
@@ -127,8 +125,14 @@ public class ItadSyncService {
                 log.debug("Progress: Mapped {} new IDs in this batch. (Cumulative: {} / Attempted: {})",
                         batchUpdated, totalUpdated, totalAttempted);
 
+                // 누적 2,000건(10개 배치) 도달 시 매핑 진행률 로깅
+                if (totalAttempted % 2000 == 0) {
+                    log.info("[ITAD ID Sync Progress] Attempted cumulative {} games. Total mapped IDs: {}",
+                            totalAttempted, totalUpdated);
+                }
 
             } catch (Exception e) {
+                // 배치 실패 예외 로깅 및 루프 재개
                 log.error("Error occurred during ITAD ID Sync batch.", e);
             }
         }
@@ -137,9 +141,8 @@ public class ItadSyncService {
     }
 
     /**
-     * ITAD ID Bulk API 응답 결과를 Game 엔티티에 병합하고 DB 반영
-     * @param gameMap [스팀 ID, Game]
-     * @param bulkResponse ITAD ID API로부터 반환된 매핑 응답 DTO
+     * ITAD Bulk API 매핑 응답 결과를 Game 엔티티에 반영.
+     * 매핑에 실패한 경우 이후 조회 필터링을 위해 "NONE" 상태로 갱신함.
      * */
     protected int updateItadIds(Map<String, Game> gameMap, ItadBulkResponse bulkResponse) {
         List<Game> gamesToSave = new ArrayList<>();
@@ -152,36 +155,34 @@ public class ItadSyncService {
             // 응답 DTO에서 해당 스팀 ID의 매핑 결과(UUID) 추출
             String itadUuid = bulkResponse.getUuidBySteamId(steamId);
 
+            // 매칭 여부에 따른 UUID 갱신
             if (itadUuid != null) {
-                // 매칭 성공: 응답으로 온 UUID를 엔티티에 업데이트
+
                 game.updateItadId(itadUuid);
                 mappedCount++;
             } else {
-                // 매칭 실패: "NONE"으로 마킹하여 다음 쿼리에서 제외되도록 함
+                // 매칭 실패 시 "NONE"으로 마킹하여 다음 쿼리에서 제외
                 game.updateItadId("NONE");
             }
 
             gamesToSave.add(game);
         }
 
-        // "NONE"으로 마킹된 게임을 포함하여 모두 DB에 반영
+        // 갱신된 게임 리스트 일괄 저장
         if (!gamesToSave.isEmpty()) {
             gameRepository.saveAll(gamesToSave);
         }
 
-        // 로그 출력을 위해 '실제로 매칭된 개수'만 반환
         return mappedCount;
     }
 
     /**
-     * ITAD ID로 최신 가격 데이터 수집
-     * 정가, 할인가, 할인율, 할인 만료 시각, 스토어 구매 URL 등 동기화
-     * (주기적으로 실행되는 메인 로직)
+     * ITAD UUID가 등록된 게임들의 스토어별 최신 가격 정보를 조회하고 DB 동기화.
      * */
     public void syncPrices() {
         log.info("Starting ITAD Price Sync...");
 
-        // ITAD ID가 있는 모든 게임 조회
+        // 유효 ITAD ID 보유 게임 목록 조회
         List<Game> gamesWithItadId = gameRepository.findByItadIdIsNotNullAndItadIdNot(NOT_FOUND);
 
         if (gamesWithItadId.isEmpty()) {
@@ -189,40 +190,45 @@ public class ItadSyncService {
             return;
         }
 
-        // 리스트를 배치 사이즈에 맞게 분할
+        // 비동기 처리를 위한 목록 청크 분할
         List<List<Game>> partitions = partitionList(gamesWithItadId, props.batchSize());
 
         int totalBatches = partitions.size();
 
         log.info("Divided into {} batches. Processing concurrently via Fixed Thread Pool...", totalBatches);
 
-        // 카운터 선언
         AtomicInteger completedBatches = new AtomicInteger(0);
         AtomicInteger totalUpdatedDetails = new AtomicInteger(0);
 
-        // 동시 실행 수 제한
+        // DB 커넥션 풀 고갈 방지를 위한 동시 실행 수 제어
         int concurrencyLimit = (props.syncThreadPoolSize() > 0) ? props.syncThreadPoolSize() : 15;
         Semaphore semaphore = new Semaphore(concurrencyLimit);
 
-        // 분할된 배치 리스트를 가상 스레드 풀에 할당하여 병렬 API 수집 진행
+        // 분할된 리스트 단위 비동기 태스크 생성
         List<CompletableFuture<Void>> futures = partitions.stream()
                 .map(batchGames -> CompletableFuture.runAsync(() -> {
                     try {
-                        // 동시 DB 트랜잭션 진입 수 제한
+                        // 스레드 점유 허가 획득
                         semaphore.acquire();
                         try {
-                            // 가격 데이터 수집 후 업데이트된 개수 반환
+                            // 단일 배치 가격 조회 및 갱신 수행
                             int updatedCount = processPriceBatchSafe(batchGames);
 
-                            // 카운트 증가
                             int currentBatch = completedBatches.incrementAndGet();
-                            totalUpdatedDetails.addAndGet(updatedCount);
 
-                            // 실시간 로깅
+                            int cumulativeUpdates = totalUpdatedDetails.addAndGet(updatedCount);
+
                             log.debug("[ITAD Price Sync] Batch {}/{} completed. (Details updated: {})",
                                     currentBatch, totalBatches, updatedCount);
+
+                            // 10개 배치 처리 단위 진행률 로깅
+                            if (currentBatch % 10 == 0 || currentBatch == totalBatches) {
+                                log.info("[ITAD Price Sync Progress] Batch {}/{} completed. (Cumulative details updated: {})",
+                                        currentBatch, totalBatches, cumulativeUpdates);
+                            }
+
                         } finally {
-                            // 작업 완료 시 권한 반환
+                            // 태스크 종료 시 Semaphore 허가 반환
                             semaphore.release();
                         }
                     } catch (InterruptedException e) {
@@ -231,7 +237,7 @@ public class ItadSyncService {
                 }, taskExecutor))
                 .toList();
 
-        // 전체 배치 작업이 완료될 때까지 대기
+        // 전체 비동기 태스크 완료 대기
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
         log.info("ITAD Price Sync Completed. Processed {} games. Total details updated: {}",
@@ -240,7 +246,7 @@ public class ItadSyncService {
 
     protected int processPriceBatchSafe(List<Game> games) {
         try {
-            // 가격 데이터 요청용 ITAD ID 리스트 추출
+            // 배치 내 ITAD ID 추출
             List<String> itadIds = games.stream().map(Game::getItadId).toList();
 
             // 스토어별 가격 정보 수집
@@ -257,18 +263,17 @@ public class ItadSyncService {
     }
 
     /**
-     * 게임 가격 정보 저장 로직 (StoreDetail Update)
+     * 게임 가격 정보 저장 메서드
      * @param games 가격 정보를 저장할 게임 리스트
      * @param prices 게임의 스토어별 가격 정보
      */
     private int savePricesInternal(List<Game> games, List<ItadPriceResponse> prices) {
 
-        // 응답 매핑용 Map 생성 (Itad Id -> Game)
-        // 동일한 Itad Id를 가진 모든 게임을 묶음
+        // 응답 매핑을 위한 ITAD ID 기준 그룹화
         Map<String, List<Game>> itadIdToGamesMap = games.stream()
                 .collect(Collectors.groupingBy(Game::getItadId));
 
-        //저장할 스토어 상세 정보 리스트
+        // 저장할 스토어 상세 정보 리스트
         List<StoreDetail> detailsToSave = new ArrayList<>();
 
         for (ItadPriceResponse priceResponse : prices) {
@@ -278,16 +283,11 @@ public class ItadSyncService {
                 continue;
             }
 
-            // 동일한 ID를 가진 게임들 중  본편만 추출
+            // 중복 매핑 방지를 위한 대표 게임(본편) 속성 필터링
             Game game = findCanonicalGame(matchedGames);
 
-
-
-            // 다중 플랫폼 키(Steam, Epic 등)를 취급하는 외부 키 셀러의 중복 딜 방어
-            // 동일 스토어에서 여러 데이터가 반환된 경우, 최저가 딜만 남겨 DB 제약조건 충돌 방지
             Map<String, ItadPriceResponse.Deal> bestDealsByStore = new HashMap<>();
 
-            // 딜 리스트 순회
             for (ItadPriceResponse.Deal deal : priceResponse.deals()) {
                 if (deal.shop() == null || deal.currentPrice() == null) continue;
 
@@ -297,7 +297,7 @@ public class ItadSyncService {
 
                 String storeNameString = itadStore.getStoreName().name();
 
-                // 스토어 이름을 Key로 하여 가장 저렴한 가격을 가진 Deal 로직 병합
+                // 동일 스토어에서 다중 응답 발생 시 가격 비교를 통한 병합
                 bestDealsByStore.merge(storeNameString, deal, (existingDeal, newDeal) -> {
                     int existingPrice = existingDeal.currentPrice().amountInt();
                     int newPrice = newDeal.currentPrice().amountInt();
@@ -305,14 +305,12 @@ public class ItadSyncService {
                 });
             }
 
-            // 필터링이 완료된 최저가 딜만 순회하여 영속성 컨텍스트 반영
+            // 스토어별 최저가 데이터 순회 및 엔티티 파싱
             for (ItadPriceResponse.Deal deal : bestDealsByStore.values()) {
-
                 ItadStore itadStore = ItadStore.fromId(Integer.parseInt(deal.shop().id()));
-                //DB에 저장될 스토어 이름
                 StoreName storeName = itadStore.getStoreName();
 
-                // Upsert 조회 (기존 데이터 있는지 확인하고 없으면 빌드)
+                // 스토어 상세 정보 Upsert 조회
                 StoreDetail storeDetail = storeDetailRepository.findByGameAndStoreName(game, storeName)
                         .orElseGet(() -> {
                                 return StoreDetail.builder()
@@ -350,16 +348,16 @@ public class ItadSyncService {
                 }
 
 
-                // 변경 감지 (Skip 최적화)
+                // 실질적인 데이터 변경 유무 확인
                 boolean isSame = isSamePriceInfo(storeDetail, currentPrice, originalPrice, cut, historicalLow, expiryKst, urlToSave);
 
-                // 실질적인 데이터 변경이 발생한 경우에만 엔티티 상태 갱신 및 리스트에 추가
+                // 값이 변경된 엔티티 필드 갱신
                 if (!isSame) {
                     log.debug("[TARGET-ALIVE] Found changes for: {} (Store: {})", game.getTitle(), storeName);
                     storeDetail.updatePriceInfo(currentPrice, originalPrice, historicalLow, cut, expiryKst, urlToSave);
                     detailsToSave.add(storeDetail);
 
-                    // 실질적인 할인이 감지되었을 때(할인율 > 0) 비동기 알림 이벤트 발행
+                    // 할인율 상승 감지 시 시스템 내부 알림을 위한 비동기 이벤트 발행
                     if (cut > 0) {
                         eventPublisher.publishEvent(
                                 new GameDiscountEvent(game.getId(), cut, expiryKst)
@@ -369,7 +367,7 @@ public class ItadSyncService {
             }
         }
 
-        // 변경된 데이터만 일괄 저장
+        // 갱신 엔티티 일괄 DB 반영
         if (!detailsToSave.isEmpty()) {
             storeDetailRepository.saveAll(detailsToSave);
             log.info("Successfully saved {} details to DB", detailsToSave.size());
@@ -392,8 +390,7 @@ public class ItadSyncService {
     }
 
     /**
-     * 변경 감지 로직 (Dirty Checking)
-     * - DB의 값과 API에서 가져온 값이 '논리적으로' 같은지 비교
+     * 기존 가격 데이터와 수집된 응답 값의 일치 여부 검증.
      */
     private boolean isSamePriceInfo(StoreDetail detail, Integer cur, Integer reg, Integer cut,
                                     Integer low, LocalDateTime expiry, String url) {
@@ -428,7 +425,7 @@ public class ItadSyncService {
     }
 
     /**
-     * 동일한 ITAD ID를 가진 여러 게임 중 본편만 반환
+     * ITAD ID 중복 게임 발생 시, 본편(Main Game) 속성을 우선하여 식별 게임을 반환.
      */
     private Game findCanonicalGame(List<Game> games) {
         // 단일 매칭이면 바로 반환
@@ -449,12 +446,4 @@ public class ItadSyncService {
                 .min(Comparator.comparing(Game::getFirstRelease, Comparator.nullsLast(Comparator.naturalOrder())))
                 .orElse(candidates.get(0));
     }
-
-//    // 애플리케이션 종료 시 스레드 풀 자원 정리
-//    @PreDestroy
-//    public void cleanup() {
-//        if (executorService != null && !executorService.isShutdown()) {
-//            executorService.shutdown();
-//        }
-//    }
 }
