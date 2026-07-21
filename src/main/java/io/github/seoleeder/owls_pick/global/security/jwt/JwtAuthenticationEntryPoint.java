@@ -42,7 +42,7 @@ public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
         }
 
         // 에러 로그 기록
-        log.error("인증 실패 (401 Unauthorized) - URI: {}, Error: {}", request.getRequestURI(), authException.getMessage());
+        log.warn("인증 실패 (401 Unauthorized) - URI: {}, Error: {}", request.getRequestURI(), authException.getMessage());
 
         // HTTP 응답 헤더 설정
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);

@@ -35,10 +35,8 @@ public class SteamDashboardSyncService {
     private final StoreDetailRepository storeDetailRepository;
     private final DashboardRepository dashboardRepository;
 
-    // Redis 캐시 관리용
     private final DashboardService dashboardService;
 
-    // 트랜잭션 수동 제어용
     private final TransactionTemplate transactionTemplate;
     
     private final SteamProperties props;
@@ -58,26 +56,46 @@ public class SteamDashboardSyncService {
         this.transactionTemplate = transactionTemplate;
         this.props = props;
     }
-    
+
     /**
-     * 최소 수집 일자부터 현재까지의 모든 대시보드 데이터 수집
-     * */
+     * 지정된 최소 수집 일자 기준 과거 차트 기록부터 최신 내역까지 순차 수집.
+     */
     public void syncHistoricalDashboards(){
         log.info("Starting Historical Dashboard Data Backfill from {}...", props.dashboard().minCollectionDate());
         
         // WeeklyTopSellers (매주 화요일부터 집계 (UTC 기준))
         LocalDate weeklyCursor = props.dashboard().minCollectionDate().with(TemporalAdjusters.nextOrSame(DayOfWeek.TUESDAY));
+
+        // 누적 수집 주(Week) 카운터
+        int weeklyCount = 0;
+
         while (weeklyCursor.isBefore(LocalDate.now())) {
             processWeeklyCollection(toEpoch(weeklyCursor),0, props.dashboard().pageCount());
             weeklyCursor = weeklyCursor.plusWeeks(1);
-            sleep(100); // API 과부하 방지
+
+            // 4주 단위 진행률 로깅
+            if (++weeklyCount % 4 == 0) {
+                log.info("[Steam Dashboard Progress] Synced {} weekly charts up to {}", weeklyCount, weeklyCursor);
+            }
+
+            sleep(100); // API 과부하 방지를 위한 딜레이
         }
 
         // MonthTopApps (매달 1일부터 그 달에 출시된 인기 게임 집계 (UTC 기준))
         LocalDate monthlyCursor = props.dashboard().minCollectionDate().withDayOfMonth(1);
+
+        // 누적 수집 월(Month) 카운터
+        int monthlyCount = 0;
+
         while (monthlyCursor.isBefore(LocalDate.now())) {
                 processMonthlyCollection(toEpoch(monthlyCursor));
             monthlyCursor = monthlyCursor.plusMonths(1);
+
+            // 3개월 단위 진행률 로깅
+            if (++monthlyCount % 3 == 0) {
+                log.info("[Steam Dashboard Progress] Synced {} monthly charts up to {}", monthlyCount, monthlyCursor);
+            }
+
             sleep(100);
         }
 
@@ -86,6 +104,9 @@ public class SteamDashboardSyncService {
         while (yearlyCursor.getYear() < LocalDate.now().getYear()) {
             processYearlyCollection(toEpoch(yearlyCursor));
             yearlyCursor = yearlyCursor.plusYears(1);
+
+            log.info("[Steam Dashboard Yearly Progress] Synced yearly chart for {}", yearlyCursor.getYear() - 1);
+
             sleep(100);
         }
 
@@ -251,56 +272,55 @@ public class SteamDashboardSyncService {
         if (response == null || response.ranks().isEmpty()) return;
 
         try {
-            // TransactionTemplate 안에서 원자적으로 실행
+            // 내부 트랜잭션 생성 후 대시보드 저장
             transactionTemplate.executeWithoutResult( status -> {
 
-                // 동일 큐레이션 타입과 동일한 수집 시각을 가진 기존 데이터 삭제 후 삽입
+                // 동일 큐레이션 타입과 수집 시각의 기존 차트 데이터 일괄 삭제
                 dashboardRepository.deleteByCurationTypeAndReferenceAt(type, response.referenceAt());
 
-                // 1. 수집된 AppID 리스트 추출 (String 변환)
+                // 차트 응답 데이터에서 스팀 앱 ID 추출
                 List<String> appIds = response.ranks().stream()
                         .map(rank -> String.valueOf(rank.appId()))
                         .toList();
 
-                // 2. DB에서 해당 AppID를 가진 Game 조회 (Bulk 조회 - QueryDSL 활용)
+                // DB에 등록된 대상만 추출하여 미등록 식별자 필터링
                 List<StoreDetail> details = storeDetailRepository.findByStoreNameAndStoreAppIdIn(
                         StoreDetail.StoreName.STEAM,
                         appIds
                 );
 
-                // 3. Map으로 변환 (AppId(Long) -> Game Entity)
+                // 식별자와 Game 엔티티 맵 구성
                 Map<Long, Game> gameMap = details.stream()
                         .collect(Collectors.toMap(
                                 detail -> Long.parseLong(detail.getStoreAppId()),
                                 StoreDetail::getGame,
-                                (existing, replacement) -> existing // 혹시 모를 중복 방지
+                                (existing, replacement) -> existing
                         ));
 
-                // 4. 엔티티 생성
                 List<Dashboard> dashboards = new ArrayList<>();
                 int missingGames = 0;
 
+                // 차트 데이터 순회 및 Dashboard 엔티티 변환
                 for (SteamDashboardResponse.Rank rank : response.ranks()) {
                     Game game = gameMap.get(rank.appId());
 
+                    // 식별 실패 게임 제외 및 카운트 처리
                     if (game == null) {
-                        // 우리 DB에 없는 게임은 랭킹에서 제외 (혹은 추후 수집 대상으로 로깅)
                         missingGames++;
                         continue;
                     }
 
                     Dashboard dashboard = Dashboard.builder()
-                            .game(game)                   // FK 매핑
+                            .game(game)
                             .curationType(type)
                             .rank(rank.rank())
-                            .referenceAt(response.referenceAt()) // 기준 시각
-                            .updatedAt(LocalDateTime.now())     // 저장 시각
+                            .referenceAt(response.referenceAt())
+                            .updatedAt(LocalDateTime.now())
                             .build();
 
                     dashboards.add(dashboard);
                 }
 
-                // 5. Bulk Insert
                 if (!dashboards.isEmpty()) {
                     dashboardRepository.saveAll(dashboards);
                 }
@@ -308,7 +328,6 @@ public class SteamDashboardSyncService {
                 log.debug("Saved {} dashboards for type [{}]. (Missing games: {})", dashboards.size(), type, missingGames);
             });
         } catch (DataAccessException e) {
-            // 트랜잭션 롤백 후 여기서 잡힘
             log.error("DB Save Failed for {}: {}", type, e.getMessage());
         } catch (Exception e) {
             log.error("Unexpected Error saving {}: ", type, e);
