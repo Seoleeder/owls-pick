@@ -11,6 +11,7 @@ import io.github.seoleeder.owls_pick.entity.game.StoreDetail.StoreName;
 import io.github.seoleeder.owls_pick.service.client.itad.event.GameDiscountEvent;
 import io.github.seoleeder.owls_pick.repository.GameRepository;
 import io.github.seoleeder.owls_pick.repository.StoreDetailRepository;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.ApplicationEventPublisher;
@@ -22,6 +23,8 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -35,9 +38,10 @@ public class ItadSyncService {
     private final GameRepository gameRepository;
     private final StoreDetailRepository storeDetailRepository;
 
-    private final AsyncTaskExecutor taskExecutor;
     private final TransactionTemplate transactionTemplate;
 
+    // DB 커넥션 풀을 고려한 병렬 처리용 고정 스레드 엔진
+    private final ExecutorService executorService;
     private final ApplicationEventPublisher eventPublisher;
 
     private final ItadProperties props;
@@ -56,8 +60,8 @@ public class ItadSyncService {
         this.collector = collector;
         this.gameRepository = gameRepository;
         this.storeDetailRepository = storeDetailRepository;
-        this.taskExecutor = taskExecutor;
         this.transactionTemplate = transactionTemplate;
+        this.executorService = Executors.newFixedThreadPool(props.syncThreadPoolSize());
         this.eventPublisher = eventPublisher;
         this.props = props;
     }
@@ -177,12 +181,12 @@ public class ItadSyncService {
     }
 
     /**
-     * ITAD UUID가 등록된 게임들의 스토어별 최신 가격 정보를 조회하고 DB 동기화.
+     * ITAD UUID가 매핑된 게임들의 스토어별 최신 가격 정보를 수집하고 DB 동기화.
      * */
     public void syncPrices() {
         log.info("Starting ITAD Price Sync...");
 
-        // 유효 ITAD ID 보유 게임 목록 조회
+        // 유효한 ITAD ID를 보유한 게임 목록 조회
         List<Game> gamesWithItadId = gameRepository.findByItadIdIsNotNullAndItadIdNot(NOT_FOUND);
 
         if (gamesWithItadId.isEmpty()) {
@@ -190,7 +194,7 @@ public class ItadSyncService {
             return;
         }
 
-        // 비동기 처리를 위한 목록 청크 분할
+        // 대용량 데이터 전송 부하를 줄이기 위해 지정된 배치 크기로 목록 분할
         List<List<Game>> partitions = partitionList(gamesWithItadId, props.batchSize());
 
         int totalBatches = partitions.size();
@@ -200,44 +204,29 @@ public class ItadSyncService {
         AtomicInteger completedBatches = new AtomicInteger(0);
         AtomicInteger totalUpdatedDetails = new AtomicInteger(0);
 
-        // DB 커넥션 풀 고갈 방지를 위한 동시 실행 수 제어
-        int concurrencyLimit = (props.syncThreadPoolSize() > 0) ? props.syncThreadPoolSize() : 15;
-        Semaphore semaphore = new Semaphore(concurrencyLimit);
-
-        // 분할된 리스트 단위 비동기 태스크 생성
+        // 분할된 배치 리스트를 고정 스레드 풀에 할당하여 병렬 통신 및 저장 수행
         List<CompletableFuture<Void>> futures = partitions.stream()
                 .map(batchGames -> CompletableFuture.runAsync(() -> {
-                    try {
-                        // 스레드 점유 허가 획득
-                        semaphore.acquire();
-                        try {
-                            // 단일 배치 가격 조회 및 갱신 수행
-                            int updatedCount = processPriceBatchSafe(batchGames);
 
-                            int currentBatch = completedBatches.incrementAndGet();
+                    // 단일 배치 단위로 가격 데이터 수집 및 DB 갱신 수행
+                    int updatedCount = processPriceBatchSafe(batchGames);
 
-                            int cumulativeUpdates = totalUpdatedDetails.addAndGet(updatedCount);
+                    int currentBatch = completedBatches.incrementAndGet();
 
-                            log.debug("[ITAD Price Sync] Batch {}/{} completed. (Details updated: {})",
-                                    currentBatch, totalBatches, updatedCount);
+                    int cumulativeUpdates = totalUpdatedDetails.addAndGet(updatedCount);
 
-                            // 10개 배치 처리 단위 진행률 로깅
-                            if (currentBatch % 10 == 0 || currentBatch == totalBatches) {
-                                log.info("[ITAD Price Sync Progress] Batch {}/{} completed. (Cumulative details updated: {})",
-                                        currentBatch, totalBatches, cumulativeUpdates);
-                            }
+                    log.debug("[ITAD Price Sync] Batch {}/{} completed. (Details updated: {})",
+                            currentBatch, totalBatches, updatedCount);
 
-                        } finally {
-                            // 태스크 종료 시 Semaphore 허가 반환
-                            semaphore.release();
-                        }
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
+                    // 10개 배치 단위 또는 최종 완료 시 진행률 로깅
+                    if (currentBatch % 10 == 0 || currentBatch == totalBatches) {
+                        log.info("[ITAD Price Sync Progress] Batch {}/{} completed. (Cumulative details updated: {})",
+                                currentBatch, totalBatches, cumulativeUpdates);
                     }
-                }, taskExecutor))
+                }, executorService))
                 .toList();
 
-        // 전체 비동기 태스크 완료 대기
+        // 모든 비동기 작업이 종료될 때까지 대기
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
         log.info("ITAD Price Sync Completed. Processed {} games. Total details updated: {}",
@@ -459,5 +448,13 @@ public class ItadSyncService {
         return candidates.stream()
                 .min(Comparator.comparing(Game::getFirstRelease, Comparator.nullsLast(Comparator.naturalOrder())))
                 .orElse(candidates.get(0));
+    }
+
+    // 애플리케이션 종료 시 ITAD 전용 스레드 풀 자원 안전 정리
+    @PreDestroy
+    public void cleanup() {
+        if (executorService != null && !executorService.isShutdown()) {
+            executorService.shutdown();
+        }
     }
 }
