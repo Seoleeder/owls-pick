@@ -61,7 +61,7 @@ public class ItadSyncService {
         this.gameRepository = gameRepository;
         this.storeDetailRepository = storeDetailRepository;
         this.transactionTemplate = transactionTemplate;
-        this.executorService = Executors.newFixedThreadPool(props.syncThreadPoolSize());
+        this.executorService = Executors.newFixedThreadPool(props.syncThreadPoolSize(), Executors.defaultThreadFactory());
         this.eventPublisher = eventPublisher;
         this.props = props;
     }
