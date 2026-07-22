@@ -199,6 +199,12 @@ public class SteamDataCollector {
             return null;
         }
 
+        // 연간 우수작 리스트가 null이거나 비어있는 경우 스킵
+        if (response.response().topApp() == null || response.response().topApp().isEmpty()) {
+            log.warn("No top apps data found for year timestamp: {}", rtimeYear);
+            return null;
+        }
+
         LocalDateTime collectedYear = TimestampUtils.toLocalDateTime(rtimeYear);
         if(collectedYear.isBefore(MIN_COLLECTION_DATE)){
             return null;
