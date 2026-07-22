@@ -58,7 +58,8 @@ public class HltbSyncService {
     public void runSyncPipeline(int chunkSize) {
         log.info("[HLTB Sync] Starting Playtime Synchronization Pipeline (Chunk: {})...", chunkSize);
 
-        int totalProcessedCount = 0;
+        int totalProcessedGames = 0;
+        int processedBatchCount = 0;
 
         while (true) {
             // 동기화 대상 조회 (UNSYNCED, FAILED)
@@ -74,12 +75,17 @@ public class HltbSyncService {
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
             // 누적 카운트 업데이트
-            totalProcessedCount += targets.size();
-            log.debug("[HLTB Sync] Successfully processed chunk of {} games. (Cumulative Total: {})",
-                    targets.size(), totalProcessedCount);
+            totalProcessedGames += targets.size();
+            processedBatchCount++;
+
+            // 10개 청크(배치) 처리 완료 시마다 누적 진행률 로깅
+            if (processedBatchCount % 10 == 0) {
+                log.info("[HLTB Sync] Processed {} chunks (Cumulative games: {})", processedBatchCount, totalProcessedGames);
+            }
         }
 
-        log.info("[HLTB Sync] Pipeline Finished.");
+        log.info("[HLTB Sync] Pipeline Completed. Total processed games: {} (Total chunks: {})",
+                totalProcessedGames, processedBatchCount);
     }
 
     /**
@@ -141,6 +147,8 @@ public class HltbSyncService {
                     .retrieve()
                     .body(HltbSyncResponse.class);
         } catch (Exception e) {
+            log.warn("FastAPI RestClient Communication Error for [{}]: [{}] {}",
+                    gameName, e.getClass().getSimpleName(), e.getMessage());
             throw new CustomException(ErrorCode.FASTAPI_COMMUNICATION_FAILED);
         }
     }
