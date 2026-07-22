@@ -33,6 +33,10 @@ public interface GameRepositoryCustom {
 
     SearchFilterMetadataResponse.PlaytimeRange getPlaytimeRange();
 
+    // --- 외부 API 게임 데이터 동기화 ---
+
+    // 커서 기반 유효 ITAD ID 보유 게임 목록 조회
+    List<Game> findValidGamesWithItadId(Long lastId, int limit);
 
     // --- 태그 기반 탐색 ---
 

@@ -65,6 +65,24 @@ public class GameRepositoryImpl implements GameRepositoryCustom {
         return Optional.ofNullable(maxDateTime);
     }
 
+    /* 외부 API 게임 데이터 동기화 쿼리 메서드 */
+    /**
+     * ITAD ID가 유효하게 존재하고 "NONE"이 아닌 게임을 커서 기반으로 지정된 limit만큼 조회
+     */
+    @Override
+    public List<Game> findValidGamesWithItadId(Long lastId, int limit) {
+        return queryFactory
+                .selectFrom(game)
+                .where(
+                        game.itadId.isNotNull(),
+                        game.itadId.ne("NONE"),
+                        lastId > 0 ? game.id.gt(lastId) : null
+                )
+                .orderBy(game.id.asc())
+                .limit(limit)
+                .fetch();
+    }
+
     /* 장르/테마 태그 기반 탐색 쿼리 메서드 */
 
     /**
