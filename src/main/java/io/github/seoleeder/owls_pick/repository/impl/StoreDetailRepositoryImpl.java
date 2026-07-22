@@ -78,34 +78,6 @@ public class StoreDetailRepositoryImpl implements StoreDetailRepositoryCustom {
     }
 
     @Override
-    public List<StoreDetail> findDetailsWithMissingItadId(StoreDetail.StoreName storeName, int limit) {
-        return queryFactory.selectFrom(storeDetail)
-                .join(storeDetail.game, game).fetchJoin()
-                .where(
-                        storeDetail.storeName.eq(storeName),
-                        game.itadId.isNull(),
-                        storeDetail.storeAppId.isNotNull()
-                )
-                .limit(limit)
-                .fetch();
-    }
-
-    @Override
-    public List<StoreDetail> findDetailsByStoreAndGameIds(StoreDetail.StoreName storeName, List<Long> gameIds) {
-        if (gameIds == null || gameIds.isEmpty()) {
-            return List.of();
-        }
-
-        return queryFactory
-                .selectFrom(storeDetail)
-                .where(
-                        storeDetail.storeName.eq(storeName),
-                        storeDetail.game.id.in(gameIds)
-                )
-                .fetch();
-    }
-
-    @Override
     public List<StoreDetail> findValidGamesMissingItadId(StoreDetail.StoreName storeName, Long lastId, int limit) {
         return queryFactory
                 .selectFrom(storeDetail)
