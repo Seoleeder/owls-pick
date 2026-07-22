@@ -1,5 +1,6 @@
 package io.github.seoleeder.owls_pick.service.client.itad;
 
+import io.github.resilience4j.retry.annotation.Retry;
 import io.github.seoleeder.owls_pick.client.itad.ItadDataCollector;
 import io.github.seoleeder.owls_pick.client.itad.ItadStore;
 import io.github.seoleeder.owls_pick.client.itad.dto.ItadBulkResponse;
@@ -40,7 +41,7 @@ public class ItadSyncService {
 
     private final TransactionTemplate transactionTemplate;
 
-    // DB 커넥션 풀을 고려한 병렬 처리용 고정 스레드 엔진
+    // DB 커넥션 풀을 고려한 플랫폼 전용 고정 스레드 풀
     private final ExecutorService executorService;
     private final ApplicationEventPublisher eventPublisher;
 
@@ -53,7 +54,6 @@ public class ItadSyncService {
             ItadDataCollector collector,
             GameRepository gameRepository,
             StoreDetailRepository storeDetailRepository,
-            @Qualifier("applicationTaskExecutor") AsyncTaskExecutor taskExecutor,
             TransactionTemplate transactionTemplate,
             ApplicationEventPublisher eventPublisher,
             ItadProperties props) {
@@ -61,6 +61,7 @@ public class ItadSyncService {
         this.gameRepository = gameRepository;
         this.storeDetailRepository = storeDetailRepository;
         this.transactionTemplate = transactionTemplate;
+        // 전역 가상 스레드 설정의 영향을 받지 않도록 플랫폼 스레드 팩토리 명시
         this.executorService = Executors.newFixedThreadPool(props.syncThreadPoolSize(), Executors.defaultThreadFactory());
         this.eventPublisher = eventPublisher;
         this.props = props;
@@ -71,7 +72,7 @@ public class ItadSyncService {
      * DB에 저장된 Steam 게임 중 ITAD ID가 누락된 게임에 대해 UUID 매핑 수행.
      */
     public void syncMissingItadIds() {
-        log.info("Starting ITAD ID Sync (Filling missing IDs)...");
+        log.info("Starting ITAD ID Sync (Filling missing IDs, Batch Size: {})...", props.batchSize());
         int totalUpdated = 0;
         int totalAttempted = 0;
         Long lastId = 0L;
@@ -88,7 +89,11 @@ public class ItadSyncService {
                 );
 
                 if (targetDetails.isEmpty()) {
-                    log.info("No more games missing ITAD IDs.");
+                    if (totalAttempted == 0) {
+                        log.info("No games missing ITAD IDs found. Skipping ID sync.");
+                    } else {
+                        log.info("No more games missing ITAD IDs.");
+                    }
                     break;
                 }
 
@@ -184,69 +189,88 @@ public class ItadSyncService {
      * ITAD UUID가 매핑된 게임들의 스토어별 최신 가격 정보를 수집하고 DB 동기화.
      * */
     public void syncPrices() {
-        log.info("Starting ITAD Price Sync...");
+        log.info("Starting ITAD Price Sync (ThreadPool Size: {}, Batch Size: {})...",
+                props.syncThreadPoolSize(), props.batchSize());
 
-        // 유효한 ITAD ID를 보유한 게임 목록 조회
-        List<Game> gamesWithItadId = gameRepository.findByItadIdIsNotNullAndItadIdNot(NOT_FOUND);
+        // 커서 조회를 위한 마지막 처리 게임 PK
+        Long lastId = 0L;
 
-        if (gamesWithItadId.isEmpty()) {
-            log.info("No games with ITAD IDs found. Run syncMissingItadIds() first.");
-            return;
+        // 처리된 게임 수
+        int totalProcessedGames = 0;
+
+        // 업데이트된 상세 스토어 건수
+        int totalUpdatedDetails = 0;
+
+        // 누적 완료 배치 수
+        int batchCount = 0;
+
+        // 비동기 작업 관리를 위한 리스트
+        List<CompletableFuture<Integer>> activeFutures = new ArrayList<>();
+
+        while (true) {
+            // 유효한 ITAD ID를 보유한 게임 목록 배치 조회
+            List<Game> batchGames = gameRepository.findValidGamesWithItadId(lastId, props.batchSize());
+
+            // 수집 대상 데이터가 없으면 동기화 종료
+            if (batchGames.isEmpty()) {
+                if (totalProcessedGames == 0) {
+                    log.info("No valid games with ITAD IDs found for price synchronization.");
+                }
+                break;
+            }
+
+            // 커서 식별자 갱신 (배치 내 마지막 엔티티 ID)
+            lastId = batchGames.get(batchGames.size() - 1).getId();
+            totalProcessedGames += batchGames.size();
+
+            // 단일 배치 가격 수집 작업을 비동기로 실행
+            CompletableFuture<Integer> future = CompletableFuture.supplyAsync(
+                    () -> processPriceBatchSafe(batchGames),
+                    executorService
+            );
+            activeFutures.add(future);
+
+            // 스레드 풀 크기 단위로 비동기 작업 완료 대기
+            if (activeFutures.size() >= props.syncThreadPoolSize()) {
+                // 현재 실행 중인 작업 그룹 완료 대기 및 결과 합산
+                totalUpdatedDetails += waitForFutures(activeFutures);
+                activeFutures.clear();
+
+                batchCount += props.syncThreadPoolSize();
+                // 10개 배치 단위 도달 시 중간 수집 진행률 출력
+                if (batchCount % 10 == 0) {
+                    log.info("[ITAD Price Sync Progress] Processed {} games. Cumulative details updated: {}",
+                            totalProcessedGames, totalUpdatedDetails);
+                }
+            }
         }
 
-        // 대용량 데이터 전송 부하를 줄이기 위해 지정된 배치 크기로 목록 분할
-        List<List<Game>> partitions = partitionList(gamesWithItadId, props.batchSize());
-
-        int totalBatches = partitions.size();
-
-        log.info("Divided into {} batches. Processing concurrently via Fixed Thread Pool...", totalBatches);
-
-        AtomicInteger completedBatches = new AtomicInteger(0);
-        AtomicInteger totalUpdatedDetails = new AtomicInteger(0);
-
-        // 분할된 배치 리스트를 고정 스레드 풀에 할당하여 병렬 통신 및 저장 수행
-        List<CompletableFuture<Void>> futures = partitions.stream()
-                .map(batchGames -> CompletableFuture.runAsync(() -> {
-
-                    // 단일 배치 단위로 가격 데이터 수집 및 DB 갱신 수행
-                    int updatedCount = processPriceBatchSafe(batchGames);
-
-                    int currentBatch = completedBatches.incrementAndGet();
-
-                    int cumulativeUpdates = totalUpdatedDetails.addAndGet(updatedCount);
-
-                    log.debug("[ITAD Price Sync] Batch {}/{} completed. (Details updated: {})",
-                            currentBatch, totalBatches, updatedCount);
-
-                    // 10개 배치 단위 또는 최종 완료 시 진행률 로깅
-                    if (currentBatch % 10 == 0 || currentBatch == totalBatches) {
-                        log.info("[ITAD Price Sync Progress] Batch {}/{} completed. (Cumulative details updated: {})",
-                                currentBatch, totalBatches, cumulativeUpdates);
-                    }
-                }, executorService))
-                .toList();
-
-        // 모든 비동기 작업이 종료될 때까지 대기
-        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        // 남은 잔여 비동기 작업 처리
+        if (!activeFutures.isEmpty()) {
+            totalUpdatedDetails += waitForFutures(activeFutures);
+            activeFutures.clear();
+        }
 
         log.info("ITAD Price Sync Completed. Processed {} games. Total details updated: {}",
-                gamesWithItadId.size(), totalUpdatedDetails.get());
+                totalProcessedGames, totalUpdatedDetails);
     }
 
+    @Retry(name = "itadApi")
     protected int processPriceBatchSafe(List<Game> games) {
         try {
             // 배치 내 ITAD ID 추출
             List<String> itadIds = games.stream().map(Game::getItadId).toList();
 
-            // 스토어별 가격 정보 수집
+            // 스토어별 최신 가격 정보 수집
             List<ItadPriceResponse> prices = collector.collectPrices(itadIds);
 
+            // 수집 성공 시 내부 트랜잭션에서 DB 반영
             if (prices != null && !prices.isEmpty()) {
                 Integer updatedCount = transactionTemplate.execute(status -> savePricesInternal(games, prices));
                 return updatedCount != null ? updatedCount : 0;
             }
         } catch (Exception e) {
-            log.warn("ITAD Price Batch Failed after retries: {}", e.getMessage());
+            log.warn("ITAD Price Batch Failed: {}", e.getMessage());
         }
         return 0;
     }
@@ -258,17 +282,17 @@ public class ItadSyncService {
      */
     private int savePricesInternal(List<Game> games, List<ItadPriceResponse> prices) {
 
-        // 응답 매핑을 위한 ITAD ID 기준 그룹화
+        // ITAD ID 기준으로 Game 그룹화
         Map<String, List<Game>> itadIdToGamesMap = games.stream()
                 .collect(Collectors.groupingBy(Game::getItadId));
 
-        // 배치 단위 일괄 조회를 위한 전체 스토어 목록 수집
+        // 전체 스토어 목록 파싱
         List<StoreName> allStoreNames = Arrays.asList(StoreName.values());
 
-        // 대상 게임들과 전체 스토어 조건에 해당하는 기존 StoreDetail 일괄 조회
-        List<StoreDetail> existingDetails = storeDetailRepository.findByGameInAndStoreNameIn(games, allStoreNames);
+        // 대상 게임 및 스토어 조건에 해당하는 기존 StoreDetail 일괄 조회
+        List<StoreDetail> existingDetails = storeDetailRepository.findAllByGamesAndStoreNames(games, allStoreNames);
 
-        // 메모리 상의 빠른 객체 식별을 위한 Map 생성 (Key: "gameId:storeName")
+        // 빠른 조회용 룩업 Map 생성 (Key: "gameId:storeName")
         Map<String, StoreDetail> detailMap = existingDetails.stream()
                 .collect(Collectors.toMap(
                         sd -> sd.getGame().getId() + ":" + sd.getStoreName().name(),
@@ -276,8 +300,11 @@ public class ItadSyncService {
                         (existing, replacement) -> existing
                 ));
 
-        // 저장할 스토어 상세 정보 리스트
+        // 신규 스토어 상세 정보 모음 리스트
         List<StoreDetail> detailsToSave = new ArrayList<>();
+
+        // 변경된 총 데이터 건수
+        int updatedCount = 0;
 
         for (ItadPriceResponse priceResponse : prices) {
             List<Game> matchedGames = itadIdToGamesMap.get(priceResponse.id()); // Itad Id로 게임 찾기
@@ -286,11 +313,12 @@ public class ItadSyncService {
                 continue;
             }
 
-            // 중복 매핑 방지를 위한 대표 게임(본편) 속성 필터링
+            // ITAD ID 중복 시 대표 게임(본편) 추출
             Game game = findCanonicalGame(matchedGames);
 
             Map<String, ItadPriceResponse.Deal> bestDealsByStore = new HashMap<>();
 
+            // 스토어별 최저가 딜 선별
             for (ItadPriceResponse.Deal deal : priceResponse.deals()) {
                 if (deal.shop() == null || deal.currentPrice() == null) continue;
 
@@ -315,6 +343,10 @@ public class ItadSyncService {
 
                 // 스토어 상세 정보 Upsert 조회
                 String lookupKey = game.getId() + ":" + storeName.name();
+
+                // 신규 데이터 여부 확인
+                boolean isNew = !detailMap.containsKey(lookupKey);
+
                 StoreDetail storeDetail = detailMap.computeIfAbsent(lookupKey, k ->
                         StoreDetail.builder()
                                 .game(game)
@@ -356,11 +388,16 @@ public class ItadSyncService {
 
                 // 값이 변경된 엔티티 필드 갱신
                 if (!isSame) {
-                    log.debug("[TARGET-ALIVE] Found changes for: {} (Store: {})", game.getTitle(), storeName);
+                    log.debug("[Price Change] Game: {} (ID: {}), Store: {}", game.getTitle(), game.getId(), storeName);
                     storeDetail.updatePriceInfo(currentPrice, originalPrice, historicalLow, cut, expiryKst, urlToSave);
-                    detailsToSave.add(storeDetail);
+                    updatedCount++;
 
-                    // 할인율 상승 감지 시 시스템 내부 알림을 위한 비동기 이벤트 발행
+                    // 신규 객체만 일괄 저장 리스트에 추가
+                    if (isNew) {
+                        detailsToSave.add(storeDetail);
+                    }
+
+                    // 할인 발생 시 이벤트 발행
                     if (cut > 0) {
                         eventPublisher.publishEvent(
                                 new GameDiscountEvent(game.getId(), cut, expiryKst)
@@ -373,23 +410,26 @@ public class ItadSyncService {
         // 갱신 엔티티 일괄 DB 반영
         if (!detailsToSave.isEmpty()) {
             storeDetailRepository.saveAll(detailsToSave);
-            log.info("Successfully saved {} details to DB", detailsToSave.size());
+            log.debug("Saved {} new StoreDetail records to DB.", detailsToSave.size());
         }
 
-        return detailsToSave.size();
+        return updatedCount;
     }
 
     // ---------------------------------------------------------------------------------
     // Helper Methods
     // ---------------------------------------------------------------------------------
 
-
-    private <T> List<List<T>> partitionList(List<T> list, int size) {
-        List<List<T>> partitions = new ArrayList<>();
-        for (int i = 0; i < list.size(); i += size) {
-            partitions.add(list.subList(i, Math.min(i + size, list.size())));
-        }
-        return partitions;
+    /**
+     * 비동기 작업 그룹 완료 대기 및 반영 결과 합산
+     */
+    private int waitForFutures(List<CompletableFuture<Integer>> futures) {
+        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                .thenApply(v -> futures.stream()
+                        .map(CompletableFuture::join)
+                        .mapToInt(Integer::intValue)
+                        .sum())
+                .join();
     }
 
     /**

@@ -33,7 +33,7 @@ public class RestClientConfig {
     }
 
     /**
-     * Vertex 엔진(한글화, 리뷰 요약, 벡터 임베딩) 전용 RestClient 빈
+     * OpenAI 엔진(한글화, 리뷰 요약, 벡터 임베딩) 전용 RestClient 빈
      */
     @Bean("genaiRestClient")
     public RestClient genaiRestClient(RestClient.Builder builder) {

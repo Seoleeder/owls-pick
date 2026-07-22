@@ -17,9 +17,6 @@ public interface GameRepository extends JpaRepository<Game, Long>, GameRepositor
     //ITAD ID 값을 엔티티에 업데이트하기 위함
     List<Game> findByItadIdIsNotNullAndItadIdNot(String excludedValue);
 
-    //ITAD ID가 있는 게임 조회
-    //가격 댕신 대상 조회하기 위함
-    List<Game> findByItadIdIsNotNull();
 
     // 가장 마지막에 수집된 게임의 IGDB ID 조회 (다음 수집 시작점)
     Optional<Game> findTopByOrderByIgdbIdDesc();

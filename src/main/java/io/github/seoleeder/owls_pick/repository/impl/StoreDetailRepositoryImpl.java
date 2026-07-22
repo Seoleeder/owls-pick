@@ -1,6 +1,7 @@
 package io.github.seoleeder.owls_pick.repository.impl;
 
 import com.querydsl.jpa.impl.JPAQueryFactory;
+import io.github.seoleeder.owls_pick.entity.game.Game;
 import io.github.seoleeder.owls_pick.entity.game.StoreDetail;
 import io.github.seoleeder.owls_pick.repository.custom.StoreDetailRepositoryCustom;
 import lombok.RequiredArgsConstructor;
@@ -118,6 +119,25 @@ public class StoreDetailRepositoryImpl implements StoreDetailRepositoryCustom {
                 )
                 .orderBy(storeDetail.id.asc()) // ASC 정렬
                 .limit(limit)
+                .fetch();
+    }
+
+    /**
+     * 배치 내 대상 게임들과 스토어 목록에 해당하는 StoreDetail 일괄 조회
+     */
+    @Override
+    public List<StoreDetail> findAllByGamesAndStoreNames(List<Game> games, List<StoreDetail.StoreName> storeNames) {
+        if (games == null || games.isEmpty()) {
+            return List.of();
+        }
+
+        return queryFactory
+                .selectFrom(storeDetail)
+                .join(storeDetail.game, game).fetchJoin()
+                .where(
+                        storeDetail.game.in(games),
+                        storeDetail.storeName.in(storeNames)
+                )
                 .fetch();
     }
 }
