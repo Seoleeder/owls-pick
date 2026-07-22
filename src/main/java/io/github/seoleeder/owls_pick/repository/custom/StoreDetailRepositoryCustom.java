@@ -1,6 +1,7 @@
 package io.github.seoleeder.owls_pick.repository.custom;
 
 
+import io.github.seoleeder.owls_pick.entity.game.Game;
 import io.github.seoleeder.owls_pick.entity.game.StoreDetail;
 import io.github.seoleeder.owls_pick.entity.game.StoreDetail.StoreName;
 
@@ -20,13 +21,10 @@ public interface StoreDetailRepositoryCustom {
     // 스팀 AppID로 게임 한번에 조회
     List<StoreDetail> findByStoreNameAndStoreAppIdIn(StoreName storeName, List<String> appIds);
 
-    // ITAD ID가 없는 게임의 스팀 App ID 조회
-    List<StoreDetail> findDetailsWithMissingItadId(StoreName storeName, int limit);
-
-    // 특정 상점(StoreName)의 게임 가격 정보 목록 조회
-    List<StoreDetail> findDetailsByStoreAndGameIds(StoreName storeName, List<Long> gameIds);
-
     // 게임 테이블에서 출시일 정보가 존재하면서 ITAD ID가 없는 게임 조회
     List<StoreDetail> findValidGamesMissingItadId(StoreName storeName, Long lastId, int limit);
+
+    // 대상 게임 목록과 스토어 조건에 해당하는 스토어 상세 정보 일괄 조회
+    List<StoreDetail> findAllByGamesAndStoreNames(List<Game> games, List<StoreName> storeNames);
 
 }
