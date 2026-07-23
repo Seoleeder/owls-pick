@@ -47,7 +47,6 @@ jobs:
         with:
           context: .
           push: true
-          no-cache: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/owls-pick-spring-api:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
