@@ -73,7 +73,7 @@ external-api:
     key: ${external-api.itad.web-api-key}
   hltb:
     fastapi-url: "${config.fastapi-url:http://owls-pick-fastapi:8000}"
-    chunk-size: 20
+    chunk-size: 10
 
 internal-api:
   genai:
