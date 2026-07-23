@@ -81,8 +81,8 @@ public class RestClientConfig {
 
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
 
-        // 네트워크 지연 및 파싱 시간을 고려하여 응답 대기 180초 제한
-        factory.setReadTimeout(Duration.ofSeconds(180));
+        // 네트워크 지연 및 파싱 시간을 고려하여 응답 대기 120초 제한
+        factory.setReadTimeout(Duration.ofSeconds(120));
 
         return builder
                 .requestFactory(factory)
