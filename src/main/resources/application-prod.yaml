@@ -8,6 +8,12 @@ spring:
     url: ${db.url}
     username: ${db.username}
     password: ${db.password}
+
+  flyway:
+    url: ${db.url}
+    user: ${db.master-username}
+    password: ${db.master-password}
+
   jpa:
     properties:
       hibernate:
