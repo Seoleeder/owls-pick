@@ -138,6 +138,7 @@ public class GameSearchController {
                                         "code": 50000,
                                         "message": "서버 내부 오류입니다."
                                       }
+                                      
                                     }
                                     """)
                     )

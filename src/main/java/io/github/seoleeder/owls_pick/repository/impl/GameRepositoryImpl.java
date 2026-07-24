@@ -441,42 +441,57 @@ public class GameRepositoryImpl implements GameRepositoryCustom {
 
     /**
      * 통합 검색 및 다중 조건(검색어, 태그, 가격, 플탐, 할인 등) 필터링
-     * distinct()로 조인 시 발생하는 데이터 중복 방지
      */
     @Override
     public Page<GameWithReviewStatDto> searchGames(GameSearchConditionRequest condition, Pageable pageable) {
 
-        // 메인 데이터 조회 쿼리 (통합 검색 및 필터링)
+        // 검색 조건을 만족하는 고유 Game ID 목록 페이징 조회
+        List<Long> gameIds = queryFactory
+                .select(game.id)
+                .from(game)
+                .leftJoin(tag).on(tag.game.id.eq(game.id))
+                .leftJoin(storeDetail).on(storeDetail.game.id.eq(game.id))
+                .leftJoin(playtime).on(playtime.game.id.eq(game.id))
+                .leftJoin(reviewStat).on(reviewStat.game.id.eq(game.id))
+                .where(
+                        gameExpressions.titleContains(condition.keyword()),
+                        gameExpressions.genresOverlap(condition.genres()),
+                        gameExpressions.themesOverlap(condition.themes()),
+                        gameExpressions.priceBetween(condition.minPrice(), condition.maxPrice()),
+                        gameExpressions.playtimeBetween(condition.minPlaytime(), condition.maxPlaytime()),
+                        gameExpressions.isDiscounting(condition.isDiscounting()),
+                        gameExpressions.isReleased()
+                )
+                .groupBy(game.id)
+                .orderBy(gameExpressions.getOrderSpecifiers(condition.sort(), condition.keyword()))
+                .offset(pageable.getOffset())
+                .limit(pageable.getPageSize())
+                .fetch();
+
+        // 조회 결과가 없으면 빈 페이지 반환
+        if (gameIds.isEmpty()) {
+            return PageableExecutionUtils.getPage(List.of(), pageable, () -> 0L);
+        }
+
+        // 식별된 gameIds 대상 상세 DTO 프로젝션 조회
         List<GameWithReviewStatDto> content = queryFactory
                 .select(Projections.constructor(GameWithReviewStatDto.class,
                         game,
                         reviewStat
                 ))
                 .from(game)
-                .join(tag).on(tag.game.id.eq(game.id)) // 태그(배열) 검색을 위한 조인
                 .leftJoin(reviewStat).on(reviewStat.game.id.eq(game.id))
-                .leftJoin(storeDetail).on(storeDetail.game.id.eq(game.id)) // 가격 필터링을 위한 조인
-                .leftJoin(playtime).on(playtime.game.id.eq(game.id))
-                .where(
-                        gameExpressions.titleContains(condition.keyword()), // 제목 유사도 검색
-                        gameExpressions.genresOverlap(condition.genres()), // 장르 교집합 검사
-                        gameExpressions.themesOverlap(condition.themes()), // 테마 교집합 검사
-                        gameExpressions.priceBetween(condition.minPrice(), condition.maxPrice()), // 가격 필터링
-                        gameExpressions.playtimeBetween(condition.minPlaytime(), condition.maxPlaytime()), // 플레이 타임 필터링
-                        gameExpressions.isDiscounting(condition.isDiscounting()),   // 할인 중인 게임 필터링
-                        gameExpressions.isReleased() // 출시 완료된 게임만 노출
-                )
+                .where(game.id.in(gameIds))
                 .orderBy(gameExpressions.getOrderSpecifiers(condition.sort(), condition.keyword()))
-                .offset(pageable.getOffset())
-                .limit(pageable.getPageSize())
                 .fetch();
 
-        // 카운트 쿼리 (페이징 최적화를 위해 별도 실행)
+        // 고유 Game 기준 카운트 쿼리
         JPAQuery<Long> countQuery = queryFactory
-                .select(game.count())
+                .select(game.id.countDistinct())
                 .from(game)
-                .join(tag).on(tag.game.id.eq(game.id))
+                .leftJoin(tag).on(tag.game.id.eq(game.id))
                 .leftJoin(storeDetail).on(storeDetail.game.id.eq(game.id))
+                .leftJoin(playtime).on(playtime.game.id.eq(game.id))
                 .where(
                         gameExpressions.titleContains(condition.keyword()),
                         gameExpressions.genresOverlap(condition.genres()),
